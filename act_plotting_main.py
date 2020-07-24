@@ -826,12 +826,16 @@ def getPrimaryForDs(args):
     print("\nCurrent output directory: " + out_dir + "\n")
     for current_idx in current_idxs:
 
+        # db_connection = ''
         db_connection = getDBConnection()
         db_connection.set_session(autocommit=True)
 
         path_in_str = path_strs[current_idx]
-
         args.file_path = path_in_str
+        if os.path.getsize(path_in_str) > args.max_file_size: # exclude if file size is > 100MB
+            print('File too large:', path_in_str, ' : ', os.path.getsize(path_in_str))
+            continue
+        # if True: continue
         print("Current input file: " + path_in_str + "\n")
         print("Creating output files...\n")
 
@@ -882,10 +886,14 @@ def getPrimaryForDs(args):
                     file_out = open("/tmp/bad_datastreams.txt", "a+")
                     file_out.write(args.out_path + "\n")
                     file_out.close()
-                    plt.close()
+                    try:
+                        plt.close()
+                    except: print('=-=-=- Failed to close "plt" -=-=-=')
                     db_connection.close()
                     return
-            plt.close()
+            try: plt.close()
+            except: print('=-=-=- Failed to close "plt", AGAIN -=-=-=')
+
         if len(image_paths) > 0:
             try:
                 combineImages(image_paths, plot_file_path)
@@ -897,11 +905,12 @@ def getPrimaryForDs(args):
                     insert_row(row['segment_name'], row['var_name'], row['out_path'], row['plot_path'], base_out_dir,
                               db_connection)
             except Exception as e:
-                plt.close()
+                try: plt.close()
+                except: print('=-=-=- Failed to close "plt" FOR THE THIRD TIME -=-=-=')
+
                 print("FAILED TO WRITE IMG: " + str(e))
                 db_connection.close()
         print("\n...done\n")
-        print(db_connection.)
         db_connection.close()
         '''
         varDict['pm_list'] = resultList
@@ -918,7 +927,7 @@ def getPrimaryForDs(args):
     print("*****************************************************************************\n\n\n")
 
 
-def main():
+def getArgs():
     parser = argparse.ArgumentParser(description='Create GeoDisplay Plot')
     parser.add_argument('-days', '--num_days', type=str,
                         help='number of days offset')
@@ -926,6 +935,19 @@ def main():
                         help='Max number of threads')
     parser.add_argument('-sites', '--site_list', type=str,
                         help='comma separated list of sites')
+    # parser.add_argument('-sitestxt', '--site_txt', type=str,
+    #                     help='comma separated list of sites')
+    parser.add_argument('-useTxtFile', '--use-txt-file', dest='use_txt_file', action='store_true', default=False,
+                        help='''Indicates to use a .txt file in the same directory which contains a 
+                        static list of datastreams to process. Used in conjunction with the -sites argument, 
+                        the name of the sites will be the relative name for the text file. 
+                        Example: "-sites anx --use-txt-file", a file named "anx.txt" must exist within 
+                        the same directory and contain newline-separated names of datastreams.''')
+    parser.add_argument('-maxFs', '--max-file-size', type=int, default=100000000, dest='max_file_size',
+                        help='max file size in number of bytes - default is 100000000 (100MB)')
+    # parser.add_argument('-q', '--quiet', action='store_false',
+    #                     help='silence a lot of the logging output')
+
     parser.add_argument('-cfg', '--config', type=str,
                         help='Config file to use for creating Plot')
     parser.add_argument('-base', '--base_dir', type=str, default='/data/archive/',
@@ -1130,94 +1152,159 @@ def main():
                         action='store_const', const=histogram)
     parser.add_argument('-ex', '--exclude', type=str, default='',
                         help='Comma separated list. Exclude any datastreams containing these values in their name.')
+    return parser.parse_args()
 
-
-    args = parser.parse_args()
-    varDict = vars(args)
-    print(args.num_t)
-    print(args.site_list)
-    sites = args.site_list.split(',')
-
-    print(sites)
-
-    exclude = args.exclude.split(',')
-    #exclude = ['anxkasacrcfrvptM1.a1','anxwsacrcfrspcvptcopolM1.a1','anxwsacrcfrspcvptxpolM1.a1','anxkasacrcfrcrrasM1.a1','anxkasacrcfrspcvptxpolM1.a1','anxmplpolfsM1.b1','anxtsiskyimageS2.a1','anxwsacrcfrhsrhiM1.a1','anxwsacrcfrvptM1.a1','anxkasacrcfrspcvptcrossM1.a1','anxkazrcfrspcmdcopolM1.a1','anxkazrcfrmdM1.a1','anxwsacrcfrppivM1.a1','anxkasacrcfrcrcM1.a1','anxkasacrcfrhsrhiM1.a1','anxkazrcfrspcgecopolM1.a1','anxwsacrcfrspcvptcrossM1.a1','anxtsiskyimageM1.a1','anxmplpolfsS2.b1','anxkazrcfrgeM1.a1','anxwsacrcfrcrcM1.a1','anxkasacrcfrspcvptcopolM1.a1','anxkasacrcfrppivM1.a1']
-    if exclude[0]: print('Excluding: ', exclude)
-
-    num_t = int(args.num_t)
-    num_days = int(args.num_days)
-    #return
-    processes = []
-
-    # SELECT_PRIMARY_MEASUREMENTS = "select d.var_name from datastream_var_name_info d where d.datastream = "
-
+def getSelectedSitePaths(sites):
     data_archive_path = '/data/archive/'
     data_archive_dirs = [os.path.join(data_archive_path, o) for o in os.listdir(data_archive_path) if
                          os.path.isdir(os.path.join(data_archive_path, o))]
     data_archive_dirs = list(filter(remove_raw_DS, data_archive_dirs))
-    data_archive_dirs = list(filter(remove_large_files, data_archive_dirs))
-    processes = []
-    for site in data_archive_dirs:
+    # data_archive_dirs = list(filter(remove_large_files, data_archive_dirs))
+    return [site for site in data_archive_dirs if os.path.basename(site) in sites]
 
-        check_site = str(os.path.basename(site))
-        if check_site not in sites:
-            continue
+def getDsListFromTxt(sites):
+    txt_files = {}
+    for site in sites:
+        site_datastreams_file = site+'.txt'
+        if os.path.isfile(site_datastreams_file):
+            with open(site_datastreams_file, 'r') as site_datastreams:
+                txt_files[site] = site_datastreams.read()
+        else: print('!![ERROR]!! Failed to read site txt file: ', site_datastreams_file)
+    return txt_files
 
-        print(str(os.path.basename(site)))
-        site_path = site
+def buildDsPaths(dsnames, site):
+    sitepath = os.path.join('/data/archive/', site)
+    dsdirs = [os.path.join(sitepath, ds) for ds in dsnames]
+    print('constructed path from datastream name and site: ', dsdirs)
+    return dsdirs
+
+def readDatastreamsFromSiteTxt(site):
+    site_datastreams_file = site+'.txt'
+    if os.path.isfile(site_datastreams_file):
+        with open(site_datastreams_file, 'r') as site_datastreams:
+            return site_datastreams.readlines()
+    else: print('!![ERROR]!! Failed to read site txt file: ', site_datastreams_file)
+
+
+def buildDsPathsFromTxt(sites):
+    paths = {}
+    for site in sites:
+        site_datastreams = readDatastreamsFromSiteTxt(site)
+            # dsnames = site_datastreams.read()
+        dspaths = [os.path.join('/data/archive/', site, ds.strip()) for ds in site_datastreams]
+        paths[site] = dspaths
+    # print('dspaths:', dspaths)
+    print('paths:', paths)
+    return paths
+
+def buildDsPaths(site, dsnames=None):
+    site_datastreams = readDatastreamsFromSiteTxt(site) if dsnames is None else dsnames
+    dspaths = [os.path.join('/data/archive/', site, ds.strip()) for ds in site_datastreams]
+    print('dspaths:', dspaths)
+    return dspaths
+
+
+def oldwayGetDsNames(sites):
+    selected_sites = getSelectedSitePaths(sites)
+    for site_path in selected_sites:
+        print(str(os.path.basename(site_path)))
         site_path_dirs = [os.path.join(site_path, o) for o in os.listdir(site_path) if
                           os.path.isdir(os.path.join(site_path, o))]
 
-        data_file_paths = list(map(str, site_path_dirs))
+        data_file_paths = list(map(str, site_path_dirs)) # /data/archive/site_code/datastream.lvl
         data_file_paths = list(filter(remove_raw_DS, data_file_paths))
-        data_file_paths = list(filter(remove_large_files, data_file_paths))
 
         ds_names = list(map(get_data_stream_name, data_file_paths))
-        ds_names = list(filter(remove_raw_DS, ds_names))
-        ds_names = list(filter(remove_large_files, ds_names))
-        #ds_names = list(np.setdiff1d(ds_names, exclude))
+        ds_names = list(filter(remove_raw_DS, ds_names))        # ds_names = list(filter(remove_large_files, ds_names))
+        # if args.use_txt_file and datastream_txt_files:
+        #     ds_names = list(filter(lambda ds : ds in datastream_txt_files[ds[:3]], ds_names))
         print(ds_names)
+        return ds_names, data_file_paths
 
-        ds_dict = {}
+def buildPrimaryMeasurementDict(ds_names):
+    ds_dict = {}
+    for ds in ds_names:
+        ds_dict[ds] = []
 
-        for ds in ds_names:
-            ds_dict[ds] = []
+    SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
+    UPDATE_PRIMARY_MEASUREMENTS = "update arm_int2.datastream_var_name_info set thumbnail_url = %s where datastream = %s and var_name = %s"
+    dbConnection = getDBConnection()
+    dbCursor = dbConnection.cursor()
+    dbCursor.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
+    results = dbCursor.fetchall()
+    # print(results)
+    for pm in results:
+        ds_dict[pm[0]].append(pm[1])
+    # print(ds_dict)
+    dbCursor.close()
+    dbConnection.close()
+    return ds_dict
 
-        SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
-        UPDATE_PRIMARY_MEASUREMENTS = "update arm_int2.datastream_var_name_info set thumbnail_url = %s where datastream = %s and var_name = %s"
-        dbConnection = getDBConnection()
-        dbCursor = dbConnection.cursor()
-        dbCursor.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
-        results = dbCursor.fetchall()
-        #print(results)
-        for pm in results:
-            ds_dict[pm[0]].append(pm[1])
 
-        #print(ds_dict)
-        dbCursor.close()
-        dbConnection.close()
+def proceed(args):
+    ds_names = args.ds_names
+    data_file_paths = args.data_file_paths
 
-        args.start_date = 'current'
-        processes = []
-        max_th = num_t
-        count = 0
-        for ds in ds_names:
-            args.ds_dir = data_file_paths[ds_names.index(ds)]
-            print("***************")
-            print(ds_names.index(ds))
-            print(data_file_paths[ds_names.index(ds)])
-            args.dsname = ds
-            args.date_offset = num_days
-            args.pm_list = ds_dict[ds]
-            getPrimaryForDs(args)
-            ds_process = multiprocessing.Process(target=getPrimaryForDs, args=(args,))
-            processes.append(ds_process)
-            ds_process.start()
+    max_th = int(args.num_t)
+    # num_days = int(args.num_days)
+    # print('num_days:', num_days)
 
-            if count % max_th == 0:
-                for t in processes:
-                    t.join()
-            count = count + 1
+    ds_dict = buildPrimaryMeasurementDict(ds_names)
+
+    args.start_date = 'current'
+    processes = []
+    # max_th = num_t
+    count = 0
+    for ds in ds_names:
+        args.ds_dir = data_file_paths[ds_names.index(ds)]  # This is so confusing!
+        print("***************")
+        print(ds_names.index(ds))
+        print(data_file_paths[ds_names.index(ds)])
+        args.dsname = ds
+        args.date_offset = args.num_days
+        args.pm_list = ds_dict[ds]
+        ds_process = multiprocessing.Process(target=getPrimaryForDs, args=(args,))
+        processes.append(ds_process)
+        ds_process.start()
+
+        if count % max_th == 0:
+            for t in processes:
+                t.join()
+        count += 1
+
+def main():
+    args = getArgs()
+
+    # varDict = vars(args)
+    sites = args.site_list.split(',')
+    print('sites:', sites)
+
+    exclude = args.exclude.split(',')
+    if exclude[0]: print('Excluding:', exclude)
+
+    # datastream_txt_files = {}
+    # if args.use_txt_file: datastream_txt_files = getDsListFromTxt(sites)
+
+
+    if args.use_txt_file:
+        print('reading sites from txt')
+        # datastream_txt_files = getDsListFromTxt(sites)
+        # dspaths = buildDsPathsFromTxt(sites)
+        for site in sites:
+            args.ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
+            print('[args.ds_names]:', args.ds_names)
+            args.data_file_paths = buildDsPaths(site=site, dsnames=args.ds_names)
+            print('[args.ds_data_file_paths]:', args.data_file_paths)
+            proceed(args)
+
+    else:
+        oldway = oldwayGetDsNames(sites)
+        args.ds_name = oldway[0]
+        args.data_file_paths = oldway[1]
+        proceed(args)
+
+        # SELECT_PRIMARY_MEASUREMENTS = "select d.var_name from datastream_var_name_info d where d.datastream = "
+
 
         '''
 
@@ -1247,8 +1334,8 @@ def main():
         t.join()
         '''
 
-        print("Done with all!")
 
 
 if __name__ == '__main__':
     main()
+    print("Done with all!")
