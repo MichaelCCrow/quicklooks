@@ -774,10 +774,39 @@ def createGiriInsert(dataStreamName, varName):
     rowEntry  = dataStreamName + '|' + varName + '|' + varName + '|' + '|' + startDate + '|' + endDate
     return rowEntry
 
-def createPreSelectInsert(dataStreamName, varName, urlStr):
-    startDate = '2019-11-01 00:00:00'
-    endDate   = '2019-12-15 00:00:00'
+
+# noinspection SqlNoDataSourceInspection
+def createPreSelectInsert(dataStreamName, varName, urlStr, startDate='2019-11-01 00:00:00', endDate='2019-12-15 00:00:00'):
     rowEntry  = dataStreamName + '|' + varName + '|' + varName + '|' + startDate + '|' + endDate + '|' + urlStr
+    # VALUES (%s, %s, %s, %s, %s, %s)
+    q = f'''
+    INSERT INTO arm_int2.pre_selected_qls_info 
+      (datastream, var_name, ql_var_name, start_date, end_date, thumbnail_url)
+    SELECT
+      {dataStreamName}, 
+      {varName}, 
+      dsinfo.primary_measurement,
+      {startDate}, 
+      {endDate},
+      {urlStr}
+    FROM arm_int2.datastream_var_name_info dsinfo
+    WHERE dsinfo.var_name = {varName}
+      AND dsinfo.datastream = {dataStreamName}
+    ON CONFLICT ON CONSTRAINT pre_selected_qs_pk
+    DO UPDATE 
+    SET 
+      start_date = {startDate}, 
+      end_date = {endDate}
+    '''
+    # INSERT INTO arm_int2.pre_selected_qls_info
+    # (datastream, var_name, ql_var_name, start_date, end_date, thumbnail_url)
+    # VALUES({dataStreamName}, {varName}, {varName}, {startDate}, {endDate}, {urlStr})
+    # ON CONFLICT
+    # WHERE datastream = {dataStreamName}
+    #     AND var_name = {varName}
+    #     AND ql_var_name = {varName}
+    # DO UPDATE SET start_date = {startDate}, end_date = {endDate}
+    print(q)
     return rowEntry
 
 def get_data_stream_name(path):
