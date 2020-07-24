@@ -785,17 +785,6 @@ def get_data_stream_name(path):
 
 def remove_raw_DS(ds_names):
     return ds_names.find(".a1") == -1
-def remove_large_files(ds_names):
-    gb = 1000000000
-    mb = 500000000
-    lessThan1GB = True
-    with open('dsnames.txt', '-a') as f:
-        f.write(ds_names + '\n')
-    if os.path.isfile(ds_names):
-        if os.path.getsize(ds_names) > mb:
-            print('!!!!! Too large: ', ds_names)
-            lessThan1GB = False
-    return lessThan1GB
 
 
 
@@ -1154,29 +1143,16 @@ def getArgs():
                         help='Comma separated list. Exclude any datastreams containing these values in their name.')
     return parser.parse_args()
 
-def getSelectedSitePaths(sites):
-    data_archive_path = '/data/archive/'
-    data_archive_dirs = [os.path.join(data_archive_path, o) for o in os.listdir(data_archive_path) if
-                         os.path.isdir(os.path.join(data_archive_path, o))]
-    data_archive_dirs = list(filter(remove_raw_DS, data_archive_dirs))
-    # data_archive_dirs = list(filter(remove_large_files, data_archive_dirs))
-    return [site for site in data_archive_dirs if os.path.basename(site) in sites]
 
-def getDsListFromTxt(sites):
-    txt_files = {}
-    for site in sites:
-        site_datastreams_file = site+'.txt'
-        if os.path.isfile(site_datastreams_file):
-            with open(site_datastreams_file, 'r') as site_datastreams:
-                txt_files[site] = site_datastreams.read()
-        else: print('!![ERROR]!! Failed to read site txt file: ', site_datastreams_file)
-    return txt_files
-
-def buildDsPaths(dsnames, site):
-    sitepath = os.path.join('/data/archive/', site)
-    dsdirs = [os.path.join(sitepath, ds) for ds in dsnames]
-    print('constructed path from datastream name and site: ', dsdirs)
-    return dsdirs
+# def getDsListFromTxt(sites):
+#     txt_files = {}
+#     for site in sites:
+#         site_datastreams_file = site+'.txt'
+#         if os.path.isfile(site_datastreams_file):
+#             with open(site_datastreams_file, 'r') as site_datastreams:
+#                 txt_files[site] = site_datastreams.read()
+#         else: print('!![ERROR]!! Failed to read site txt file: ', site_datastreams_file)
+#     return txt_files
 
 def readDatastreamsFromSiteTxt(site):
     site_datastreams_file = site+'.txt'
@@ -1186,16 +1162,15 @@ def readDatastreamsFromSiteTxt(site):
     else: print('!![ERROR]!! Failed to read site txt file: ', site_datastreams_file)
 
 
-def buildDsPathsFromTxt(sites):
-    paths = {}
-    for site in sites:
-        site_datastreams = readDatastreamsFromSiteTxt(site)
+# def buildDsPathsFromTxt(sites):
+#     paths = {}
+#     for site in sites:
+#         site_datastreams = readDatastreamsFromSiteTxt(site)
             # dsnames = site_datastreams.read()
-        dspaths = [os.path.join('/data/archive/', site, ds.strip()) for ds in site_datastreams]
-        paths[site] = dspaths
-    # print('dspaths:', dspaths)
-    print('paths:', paths)
-    return paths
+        # dspaths = [os.path.join('/data/archive/', site, ds.strip()) for ds in site_datastreams]
+        # paths[site] = dspaths
+    # print('paths:', paths)
+    # return paths
 
 def buildDsPaths(site, dsnames=None):
     site_datastreams = readDatastreamsFromSiteTxt(site) if dsnames is None else dsnames
@@ -1205,6 +1180,13 @@ def buildDsPaths(site, dsnames=None):
 
 
 def oldwayGetDsNames(sites):
+    def getSelectedSitePaths(sites):
+        data_archive_path = '/data/archive/'
+        data_archive_dirs = [os.path.join(data_archive_path, o) for o in os.listdir(data_archive_path) if
+                             os.path.isdir(os.path.join(data_archive_path, o))]
+        data_archive_dirs = list(filter(remove_raw_DS, data_archive_dirs))
+        return [site for site in data_archive_dirs if os.path.basename(site) in sites]
+
     selected_sites = getSelectedSitePaths(sites)
     for site_path in selected_sites:
         print(str(os.path.basename(site_path)))
@@ -1215,7 +1197,7 @@ def oldwayGetDsNames(sites):
         data_file_paths = list(filter(remove_raw_DS, data_file_paths))
 
         ds_names = list(map(get_data_stream_name, data_file_paths))
-        ds_names = list(filter(remove_raw_DS, ds_names))        # ds_names = list(filter(remove_large_files, ds_names))
+        ds_names = list(filter(remove_raw_DS, ds_names))
         # if args.use_txt_file and datastream_txt_files:
         #     ds_names = list(filter(lambda ds : ds in datastream_txt_files[ds[:3]], ds_names))
         print(ds_names)
