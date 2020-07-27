@@ -768,46 +768,54 @@ def getOutputUrl(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, pmRes
     outPath = finalOutputDir + outFilePrefix + pmResult + '.png'
     return outPath
 
-def createGiriInsert(dataStreamName, varName):
-    startDate = '2019-11-01 00:00:00'
-    endDate   = '9999-09-09 00:00:00'
-    rowEntry  = dataStreamName + '|' + varName + '|' + varName + '|' + '|' + startDate + '|' + endDate
-    return rowEntry
+def createGiriInsert(datastreamName, varName, startDate='2019-11-01 00:00:00', endDate='9999-09-09 00:00:00'):
+    # rowEntry  = datastreamName + '|' + varName + '|' + varName + '|' + '|' + startDate + '|' + endDate
+    # noinspection SqlNoDataSourceInspection
+    q = f'''
+    INSERT INTO color.giri_inventory 
+      (datastream, var_name, ql_var_name, measurement, start_date, end_date)
+    SELECT
+      '{datastreamName}', 
+      '{varName}', 
+      '{varName}', 
+      dsinfo.primary_measurement,
+      '{startDate}', 
+      '{endDate}'
+    FROM arm_int2.datastream_var_name_info dsinfo
+    WHERE dsinfo.var_name = '{varName}'
+      AND dsinfo.datastream = '{datastreamName}'
+    ON CONFLICT ON CONSTRAINT giri_inventory_pkey
+    DO UPDATE SET end_date = '{endDate}'
+    '''
+    # DO NOTHING
+    # print('[giri_inventory]', q)
+    return q
+    # return rowEntry
 
 
 # noinspection SqlNoDataSourceInspection
-def createPreSelectInsert(dataStreamName, varName, urlStr, startDate='2019-11-01 00:00:00', endDate='2019-12-15 00:00:00'):
-    rowEntry  = dataStreamName + '|' + varName + '|' + varName + '|' + startDate + '|' + endDate + '|' + urlStr
+def createPreSelectInsert(datastreamName, varName, urlStr, startDate='2019-11-01 00:00:00', endDate='9999-09-09 00:00:00'):
+    # endDate='2019-12-15 00:00:00'
+    # rowEntry  = datastreamName + '|' + varName + '|' + varName + '|' + startDate + '|' + endDate + '|' + urlStr
     # VALUES (%s, %s, %s, %s, %s, %s)
     q = f'''
     INSERT INTO arm_int2.pre_selected_qls_info 
       (datastream, var_name, ql_var_name, start_date, end_date, thumbnail_url)
-    SELECT
-      {dataStreamName}, 
-      {varName}, 
-      dsinfo.primary_measurement,
-      {startDate}, 
-      {endDate},
-      {urlStr}
-    FROM arm_int2.datastream_var_name_info dsinfo
-    WHERE dsinfo.var_name = {varName}
-      AND dsinfo.datastream = {dataStreamName}
+    VALUES (
+      '{datastreamName}', 
+      '{varName}', 
+      '{varName}', 
+      '{startDate}', 
+      '{endDate}',
+      '{urlStr}'
+    ) 
     ON CONFLICT ON CONSTRAINT pre_selected_qs_pk
-    DO UPDATE 
-    SET 
-      start_date = {startDate}, 
-      end_date = {endDate}
+    DO UPDATE SET end_date = '{endDate}'
     '''
-    # INSERT INTO arm_int2.pre_selected_qls_info
-    # (datastream, var_name, ql_var_name, start_date, end_date, thumbnail_url)
-    # VALUES({dataStreamName}, {varName}, {varName}, {startDate}, {endDate}, {urlStr})
-    # ON CONFLICT
-    # WHERE datastream = {dataStreamName}
-    #     AND var_name = {varName}
-    #     AND ql_var_name = {varName}
-    # DO UPDATE SET start_date = {startDate}, end_date = {endDate}
-    print(q)
-    return rowEntry
+    # DO NOTHING
+    # print('[pre_selected_qls_info]', q)
+    return q
+    # return rowEntry
 
 def get_data_stream_name(path):
     return str(os.path.basename(os.path.normpath(path)))
@@ -815,7 +823,19 @@ def get_data_stream_name(path):
 def remove_raw_DS(ds_names):
     return ds_names.find(".a1") == -1
 
+def insert_qls_info(q, db_connection, table):
+    try:
+        db_cursor = db_connection.cursor()
+        db_cursor.execute(q)
+        db_cursor.close()
+        print(f'[{table}] INSERT success')
 
+        # db_cursor.execute(stmt, (datastream, var_name, thumbnail_url, plot_url))
+        # db_connection.commit()
+    except Exception as e:
+        print(f'[FAILED INSERT][{table}]', q)
+        print('[reason]', e)
+        pass
 
 # def getPrimaryForDs(data_stream_name, args, date_offset, base_out_dir, result_list):
 def getPrimaryForDs(args):
@@ -882,8 +902,10 @@ def getPrimaryForDs(args):
                     rowEntry = createPreSelectInsert(data_stream_name, result, urlStr)
                     rowEntryB = createGiriInsert(data_stream_name, result)
                     print('URL STRING: '  + urlStr)
-                    print('ROWA STRING: '  + rowEntry)
-                    print('ROWB STRING: '  + rowEntryB)
+                    # print('ROWA STRING: '  + rowEntry)
+                    # print('ROWB STRING: '  + rowEntryB)
+                    insert_qls_info(rowEntry, db_connection, 'pre_selected_qls_info')
+                    insert_qls_info(rowEntryB, db_connection, 'giri_inventory')
                     #    insert_row(getSegmentName(path_in_str), result, args.out_path, plot_file_path, base_out_dir,
                     #               db_connection)
                     continue
@@ -1238,7 +1260,7 @@ def buildPrimaryMeasurementDict(ds_names):
         ds_dict[ds] = []
 
     SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
-    UPDATE_PRIMARY_MEASUREMENTS = "update arm_int2.datastream_var_name_info set thumbnail_url = %s where datastream = %s and var_name = %s"
+    # UPDATE_PRIMARY_MEASUREMENTS = "update arm_int2.datastream_var_name_info set thumbnail_url = %s where datastream = %s and var_name = %s"
     dbConnection = getDBConnection()
     dbCursor = dbConnection.cursor()
     dbCursor.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
@@ -1282,6 +1304,8 @@ def proceed(args):
             for t in processes:
                 t.join()
         count += 1
+    print('done done? -------------------------------')
+
 
 def main():
     args = getArgs()
@@ -1298,7 +1322,7 @@ def main():
 
 
     if args.use_txt_file:
-        print('reading sites from txt')
+        print('-- reading datastreams from site txt --')
         # datastream_txt_files = getDsListFromTxt(sites)
         # dspaths = buildDsPathsFromTxt(sites)
         for site in sites:
@@ -1310,7 +1334,7 @@ def main():
 
     else:
         oldway = oldwayGetDsNames(sites)
-        args.ds_name = oldway[0]
+        args.ds_names = oldway[0]
         args.data_file_paths = oldway[1]
         proceed(args)
 
@@ -1348,5 +1372,6 @@ def main():
 
 
 if __name__ == '__main__':
+    print('[BEGIN]', datetime.now(),'\n--------------------------------------------\n')
     main()
     print("Done with all!")
