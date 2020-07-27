@@ -899,8 +899,9 @@ def getPrimaryForDs(args):
 
                 if os.path.exists(args.out_path):
                     urlStr = getOutputUrl(site_name, data_stream_name, base_out_dir, out_dir, fig_size_dir, result, path_in_str)
-                    rowEntry = createPreSelectInsert(data_stream_name, result, urlStr)
-                    rowEntryB = createGiriInsert(data_stream_name, result)
+                    endDate = args.end_dates[data_stream_name]
+                    rowEntry = createPreSelectInsert(data_stream_name, result, urlStr, endDate=endDate)
+                    rowEntryB = createGiriInsert(data_stream_name, result, endDate=endDate)
                     print('URL STRING: '  + urlStr)
                     # print('ROWA STRING: '  + rowEntry)
                     # print('ROWB STRING: '  + rowEntryB)
@@ -1327,6 +1328,14 @@ def main():
             print('[args.ds_names]:', args.ds_names)
             args.data_file_paths = buildDsPaths(site=site, dsnames=args.ds_names)
             print('[args.ds_data_file_paths]:', args.data_file_paths)
+            end_dates = {}
+            for path in args.data_file_paths:
+                modified_time = os.path.getmtime(path)
+                end_date = datetime.fromtimestamp(modified_time).strftime('%Y-%m-%d %H:%M:%S')
+                print('modified:', path, '-', end_date)
+                end_dates[os.path.basename(path)] = end_date
+            args.end_dates = end_dates
+
             proceed(args)
 
     else:
