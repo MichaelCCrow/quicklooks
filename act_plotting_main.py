@@ -21,6 +21,9 @@ import multiprocessing
 import time
 import re
 
+from functools import partial
+import copy
+
 import crontab
 
 from pathlib import Path
@@ -830,8 +833,6 @@ def createGiriInsert(datastreamName, varName, startDate='2019-11-01 00:00:00', e
 
 
 def createPreSelectInsert(datastreamName, varName, urlStr, startDate='2019-11-01 00:00:00', endDate='9999-09-09 00:00:00'):
-    # endDate='2019-12-15 00:00:00'
-    # rowEntry  = datastreamName + '|' + varName + '|' + varName + '|' + startDate + '|' + endDate + '|' + urlStr
     # VALUES (%s, %s, %s, %s, %s, %s)
     print(f'[insert] [pre_selected_qls_info] {datastreamName} : {varName} :: {startDate} - {endDate}')
     # noinspection SqlNoDataSourceInspection
@@ -849,10 +850,8 @@ def createPreSelectInsert(datastreamName, varName, urlStr, startDate='2019-11-01
     ON CONFLICT ON CONSTRAINT pre_selected_qs_pk
     DO UPDATE SET end_date = '{endDate}'
     '''
-    # DO NOTHING
     # print('[pre_selected_qls_info]', q)
     return q
-    # return rowEntry
 
 def get_data_stream_name(path):
     return str(os.path.basename(os.path.normpath(path)))
@@ -875,8 +874,14 @@ def insert_qls_info(q, db_connection, table):
         pass
 
 # def getPrimaryForDs(data_stream_name, args, date_offset, base_out_dir, result_list):
-def getPrimaryForDs(args):
-    global num_db_closed
+def getPrimaryForDs(args, dsname):
+    print('--------------------------- dsname::::::::: ', dsname)
+    args.ds_dir = args.data_file_paths[args.ds_names.index(dsname)]
+    args.dsname = dsname
+    args.date_offset = args.num_days
+    args.pm_list = args.ds_dict[dsname]
+    args.date_offset = args.num_days
+    # global num_db_closed
     data_stream_name = args.dsname
     date_offset = args.date_offset
     base_out_dir = args.base_out_dir
@@ -895,6 +900,9 @@ def getPrimaryForDs(args):
     out_dir = args.out_dir
     path_strs = getPathStrs(args.data_dir)
     current_idxs = getSortedFileIndices(args.start_date, date_offset, path_strs)
+    if not current_idxs:
+        print(f'[ERROR] current_idxs is None - skipping dsname:[{dsname}] outdir:[{out_dir}]')
+        return
 
     args.file_paths = []
     args.dsname = data_stream_name
@@ -923,8 +931,6 @@ def getPrimaryForDs(args):
         plot_file_path = getPlotFilePath(site_name, data_stream_name, base_out_dir, out_dir, "", path_in_str)
         for idx in range(0, 2):
             for result in result_list:
-                # print(args.out_path)
-
                 args.field = result
                 fig_size_dir = fig_size_dirs[idx]
                 args.out_path = getOutputFilePath(site_name, data_stream_name, base_out_dir, out_dir, fig_size_dir,
@@ -969,7 +975,7 @@ def getPrimaryForDs(args):
                         plt.close()
                     except: print('=-=-=- Failed to close "plt" -=-=-=')
                     db_connection.close()
-                    num_db_closed += 1
+                    # num_db_closed += 1
                     return
             try: plt.close()
             except: print('=-=-=- Failed to close "plt", AGAIN -=-=-=')
@@ -990,10 +996,10 @@ def getPrimaryForDs(args):
 
                 print("FAILED TO WRITE IMG: " + str(e))
                 db_connection.close()
-                num_db_closed += 1
+                # num_db_closed += 1
         print("\n...done\n")
         db_connection.close()
-        num_db_closed += 1
+        # num_db_closed += 1
 
         '''
         varDict['pm_list'] = resultList
@@ -1040,7 +1046,7 @@ def readDatastreamsFromSiteTxt(site):
 def buildDsPaths(site, dsnames=None):
     site_datastreams = readDatastreamsFromSiteTxt(site) if dsnames is None else dsnames
     dspaths = [os.path.join('/data/archive/', site, ds.strip()) for ds in site_datastreams]
-    print('dspaths:', dspaths)
+    # print('dspaths:', dspaths)
     return dspaths
 
 
@@ -1100,28 +1106,34 @@ def proceed(args):
     # num_days = int(args.num_days)
     # print('num_days:', num_days)
 
-    ds_dict = buildPrimaryMeasurementDict(ds_names)
+    args.ds_dict = buildPrimaryMeasurementDict(ds_names)
 
     args.start_date = 'current'
     processes = []
     # max_th = num_t
     count = 0
-    for ds in ds_names:
-        args.ds_dir = data_file_paths[ds_names.index(ds)]  # This is so confusing!
-        print("***************")
-        print(ds_names.index(ds))
-        print(data_file_paths[ds_names.index(ds)])
-        args.dsname = ds
-        args.date_offset = args.num_days
-        args.pm_list = ds_dict[ds]
-        ds_process = multiprocessing.Process(target=getPrimaryForDs, args=(args,))
-        processes.append(ds_process)
-        ds_process.start()
 
-        if count % max_th == 0:
-            for t in processes:
-                t.join()
-        count += 1
+    pool = multiprocessing.Pool(max_th)
+    partial_rename = partial(getPrimaryForDs, copy.deepcopy(args))
+    pool.map(partial_rename, ds_names)
+
+
+    # for ds in ds_names:
+    #     # args.ds_dir = data_file_paths[ds_names.index(ds)]  # This is so confusing!
+    #     print("***************")
+    #     print(ds_names.index(ds))
+    #     print(data_file_paths[ds_names.index(ds)])
+    #     args.dsname = ds
+    #     args.date_offset = args.num_days
+    #     args.pm_list = ds_dict[ds]
+    #     ds_process = multiprocessing.Process(target=getPrimaryForDs, args=(args, ds_dict))
+    #     processes.append(ds_process)
+    #     ds_process.start()
+    #
+    #     if count % max_th == 0:
+    #         for t in processes:
+    #             t.join()
+    #     count += 1
     print('Should be all the way done...')
 
 def getArgs():
