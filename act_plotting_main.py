@@ -1300,6 +1300,9 @@ def main(args):
             args.data_file_paths = buildDsPaths(site=site, dsnames=args.ds_names)
             args.data_file_paths = list(filter(lambda p: offsetDays(p, args.num_days), args.data_file_paths))
             args.ds_names = [ ds for ds in args.ds_names if any(ds in path for path in args.data_file_paths) ]
+            if len(args.ds_names) == 0:
+                print(f'No recent datastream files in the day range [{args.num_days}] for site [{site}]')
+                continue
             print('[dsname len]',len(args.ds_names))
             print('[datastream_file_paths]::', args.data_file_paths)
             end_dates = {}
@@ -1315,7 +1318,6 @@ def main(args):
             pool = multiprocessing.Pool(int(args.num_t))
             partial_getPrimaryForDs = partial(getPrimaryForDs, copy.deepcopy(args))
             pool.map(partial_getPrimaryForDs, args.ds_names)
-            # proceed(args)
 
     else:
         print('[WARNING] This will attempt to get all datastreams for a given site. This is not recommended and not guaranteed to work. '
