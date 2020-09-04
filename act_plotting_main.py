@@ -42,33 +42,26 @@ def getDBConnection():
     prepare_threshold = "prepare_threshold=0" + " "
 
     dbString = dbname + user + host + password + port + connection_timeout
-    # print(dbString)
-
     dbConnection = None
     try:
         dbConnection = psycopg2.connect(dbString)
         print('[OPENED]')
     except (Exception, psycopg2.DatabaseError) as error:
         print('[ERROR] Database connection failed.', error)
-
         return None
     finally:
         if dbConnection is not None:
             return dbConnection
 
-
 def get_file_date(filePath):
     strDate = os.path.basename(os.path.normpath(filePath)).split('.')[2]
     return datetime.strptime(strDate, '%Y%m%d')
 
-
 def getDateStr(dateObj):
     return datetime.strftime(dateObj, '%Y%m%d')
 
-
 def getStartDate(dates, selectedDate):
     return min(dates, key=lambda currDate: abs(currDate - selectedDate))
-
 
 def getPrimaryMeasurements(statement, dbCursor):
     dbCursor.execute(statement)
@@ -78,7 +71,6 @@ def getPrimaryMeasurements(statement, dbCursor):
         resultList.append(list(result)[0])
         print(list(result)[0])
     return resultList
-
 
 def offsetDays(file, days=1):
     file = Path(file)
@@ -95,7 +87,6 @@ def getPathStrs(dataDir):
     pathStrs += list(map(str, pathlistCDF))
 
     return pathStrs
-
 
 def getSortedFileIndices(startDate, dateOffset, pathStrs):
     dates = []
@@ -125,7 +116,6 @@ def getSortedFileIndices(startDate, dateOffset, pathStrs):
 
     return currentIdxs
 
-
 def getOutputFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, pmResult, dataFilePath):
     dataFname = os.path.basename(dataFilePath)
     splitDFname = dataFname.split('.')
@@ -154,7 +144,6 @@ def getOutputFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, 
     outPath = finalOutputDir + outFilePrefix + pmResult + '.png'
     return outPath
 
-
 def getSegmentName(dataFilePath):
     dataFname = os.path.basename(dataFilePath)
     splitDFname = dataFname.split('.')
@@ -174,7 +163,6 @@ def getSegmentName(dataFilePath):
     dateDir = splitDFname[0] + '.' + splitDFname[1] + '.' + yearMonth
 
     return dateDir
-
 
 def getPlotFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, dataFilePath):
     dataFname = os.path.basename(dataFilePath)
@@ -204,10 +192,8 @@ def getPlotFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, da
     outPath = finalOutputDir + outFilePrefix + '.png'
     return outPath
 
-
 def combineImages(imagePaths, plot_file_path):
     try:
-
         images = [Image.open(x) for x in imagePaths]
         widths, heights = zip(*(i.size for i in images))
 
@@ -242,7 +228,6 @@ def combineImages(imagePaths, plot_file_path):
         print(e)
         plt.close()
 
-
 def insert_row(datastream, var_name, thumbnail_url, plot_url, base_out_dir, db_connection):
     thumbnail_url = thumbnail_url.replace(base_out_dir, 'https://www.archive.arm.gov/quicklooks/')
     plot_url = plot_url.replace(base_out_dir, 'https://www.archive.arm.gov/quicklooks/')
@@ -258,21 +243,6 @@ def insert_row(datastream, var_name, thumbnail_url, plot_url, base_out_dir, db_c
     except Exception as e:
         print(e)
         #update_row(datastream, var_name, thumbnail_url, db_connection)
-
-
-# def update_row(datastream, var_name, thumbnail_url, db_connection):
-#     UPDATE_PRIMARY_MEASUREMENTS = 'update arm_int2.datastream_var_name_info set thumbnail_url = %s where ' \
-#                                   'datastream = %s and var_name = %s '
-#     print(UPDATE_PRIMARY_MEASUREMENTS)
-#     print('DSP: ' + datastream)
-#     try:
-#         db_cursor = db_connection.cursor()
-#         db_cursor.execute(UPDATE_PRIMARY_MEASUREMENTS, (datastream, var_name, thumbnail_url))
-        # db_connection.commit()
-        # db_cursor.close()
-    # except Exception as e:
-    #     print(e)
-
 
 def getPrimaryForDatastream(dbCursor, data_stream_name, statement, args, date_offset, base_out_dir):
     site_name = data_stream_name[0:3]
@@ -364,7 +334,6 @@ def getPrimaryForDatastream(dbCursor, data_stream_name, statement, args, date_of
         '''
     print("*****************************************************************************\n\n\n")
 
-
 def geodisplay(args):
     ds = act.io.armfiles.read_netcdf(args.file_path)
 
@@ -383,7 +352,6 @@ def geodisplay(args):
     plt.close(display.fig)
 
     ds.close()
-
 
 def skewt(args):
     ds = act.io.armfiles.read_netcdf(args.file_path)
@@ -410,7 +378,6 @@ def skewt(args):
         plt.close(display.fig)
 
     ds.close()
-
 
 def xsection(args):
     ds = act.io.armfiles.read_netcdf(args.file_path)
@@ -441,7 +408,6 @@ def xsection(args):
 
     ds.close()
 
-
 def wind_rose(args):
     ds = act.io.armfiles.read_netcdf(args.file_path)
 
@@ -456,7 +422,6 @@ def wind_rose(args):
     plt.close(display.fig)
 
     ds.close()
-
 
 def mtimeseries(args):
     outPath = args.out_path
@@ -618,7 +583,6 @@ def timeseries(args):
 
     ds.close()
 
-
 def histogram(args):
     ds = act.io.armfiles.read_netcdf(args.file_path)
 
@@ -662,7 +626,6 @@ def histogram(args):
         plt.close(display.fig)
 
     ds.close()
-
 
 def contour(args):
     files = glob.glob(args.file_path)
@@ -710,7 +673,6 @@ def contour(args):
 
     ds.close()
 
-
 def parseStartDate(startDate):
     try:
         return datetime.strptime(startDate, '%Y%m%d')
@@ -718,7 +680,6 @@ def parseStartDate(startDate):
         if startDate != 'current':
             raise ValueError("Incorrect date format. Should be 'YYYYMMDD'. Defaulting to latest data.")
         return 'current'
-
 
 def parseCsv(csvName, baseDir, baseOutDir):
     config = []
@@ -747,7 +708,6 @@ def parseCsv(csvName, baseDir, baseOutDir):
             config.append(datastream)
     return config
 
-
 def processBulk(args):
     varDict = vars(args)
     dsDir = args.ds_dir
@@ -775,7 +735,6 @@ def processBulk(args):
     #                        varDict['base_out_dir'])
     dbConnection.close()
 
-
 def processSubset(args):
     SELECT_PRIMARY_MEASUREMENTS = "select d.var_name from datastream_var_name_info d where d.datastream = "
 
@@ -790,7 +749,6 @@ def processSubset(args):
     getPrimaryForDatastream(dbCursor, dataType, currentSelect, args, datastream['range_offset'],
                             args.base_out_dir)
     dbConnection.close()
-
 
 def getOutputUrl(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, pmResult, dataFilePath):
     dataFname = os.path.basename(dataFilePath)
@@ -903,13 +861,6 @@ def getPrimaryForDs(args, dsname):
     print(f'\nCurrent output directory: {out_dir}\n')
 
     for current_idx in current_idxs:
-
-        # db_connection = getDBConnection()
-        # if not db_connection:
-        #     print('!!!! Failed to get db connection !!!! ')
-        #     continue
-        # db_connection.set_session(autocommit=True)
-
         path_in_str = path_strs[current_idx]
         args.file_path = path_in_str # needed for plotting methods
 
@@ -994,12 +945,6 @@ def readDatastreamsFromSiteTxt(site):
         err = f'!![ERROR]!! Failed to read site txt file: {site_datastreams_file}'
         print(err)
         sys.stderr.write(err)
-
-def buildDsPaths(site, dsnames=None):
-    site_datastreams = readDatastreamsFromSiteTxt(site) if dsnames is None else dsnames
-    dspaths = [os.path.join('/data/archive/', site, ds.strip()) for ds in site_datastreams]
-    return dspaths
-
 
 def oldwayGetDsNames(sites):
     def getSelectedSitePaths(sites):
@@ -1287,8 +1232,9 @@ def main(args):
         print('-- reading datastreams from site txt --')
         for site in sites:
             args.ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
+            if args.ds_names is None: continue
 
-            args.data_file_paths = buildDsPaths(site=site, dsnames=args.ds_names)
+            args.data_file_paths = [os.path.join('/data/archive/', site, ds.strip()) for ds in args.ds_names]
             args.data_file_paths = list(filter(lambda p: offsetDays(p, args.num_days), args.data_file_paths))
             # reduce ds_names to only those within data_file_paths
             args.ds_names = [ ds for ds in args.ds_names if any(ds in path for path in args.data_file_paths) ]
@@ -1310,7 +1256,7 @@ def main(args):
         print('[WARNING] This will attempt to get all datastreams for a given site. This is not recommended and not guaranteed to work. '
               'Please use the --use-txt-file flag and provide a file in the same directory containing a list of datastreams to process, '
               'named like sgp.txt or anx.txt. If you wish to try this anyway, uncomment the proceeding lines in main().')
-        exit(1)
+        sys.exit(1)
         # oldway = oldwayGetDsNames(sites)
         # args.end_dates = {}
         # args.ds_names = oldway[0]
