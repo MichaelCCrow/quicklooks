@@ -103,7 +103,7 @@ def getSortedFileIndices(startDate, dateOffset, pathStrs):
         dates = list(map(get_file_date, pathStrs))
     except Exception as e:
         print(f'badDate -- {e}')
-        return
+        return dates
     npDates = np.array(dates)
     npDatesSortedIdxs = np.argsort(npDates)
 
@@ -868,8 +868,6 @@ def insert_qls_info(q, conn, table):
     try:
         with conn.cursor() as curs:
             curs.execute(q)
-            # conn.commit()
-            # curs.close()
             print(f'[{table}] INSERT success')
     except Exception as e:
         print(f'[FAILED INSERT][{table}]', q)
@@ -877,7 +875,7 @@ def insert_qls_info(q, conn, table):
         pass
 
 def getPrimaryForDs(args, dsname):
-    print('--------------------------- dsname::::::::: ', dsname)
+    print(f'[{dsname}]')
     args.dsname = dsname # required for other methods to find the dsname
     args.ds_dir = args.data_file_paths[args.ds_names.index(dsname)]
     out_dir = args.base_out_dir + os.path.basename(args.ds_dir)
@@ -890,7 +888,6 @@ def getPrimaryForDs(args, dsname):
     print('Creating plots for the following variables...\n')
 
     path_strs = getPathStrs(args.ds_dir)
-    # print('[path_strs]'); print(path_strs); print('=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=')
 
     # print('[before filter]', len(path_strs))
     # path_strs = list(filter(offsetDays, path_strs))
@@ -901,9 +898,6 @@ def getPrimaryForDs(args, dsname):
         return
 
     current_idxs = getSortedFileIndices(args.start_date, args.num_days, path_strs)
-    if not current_idxs:
-        print(f'[ERROR] current_idxs is None - skipping dsname:[{dsname}] outdir:[{out_dir}]')
-        return
 
     # args.file_paths = [] # don't think this is needed
     print(f'\nCurrent output directory: {out_dir}\n')
@@ -918,7 +912,6 @@ def getPrimaryForDs(args, dsname):
 
         path_in_str = path_strs[current_idx]
         args.file_path = path_in_str # needed for plotting methods
-
 
         if os.path.getsize(path_in_str) > args.max_file_size: # exclude if file size is > 100MB
             print(f'File too large: {path_in_str} :', os.path.getsize(path_in_str))
@@ -953,7 +946,6 @@ def getPrimaryForDs(args, dsname):
                     conn = getDBConnection()
                     try:
                         with conn:
-                            # conn.set_session(autocommit=True)
                             insert_qls_info(pre_selected_qls_info_insert_query, conn, 'pre_selected_qls_info')
                             insert_qls_info(giri_inventory_insert_query, conn, 'giri_inventory')
                     finally:
@@ -976,10 +968,7 @@ def getPrimaryForDs(args, dsname):
                     print(f'Failed to process: {path_in_str}')
                     with open('/tmp/bad_datastreams.txt', 'a+') as file_out:
                         file_out.write(args.out_path + '\n')
-                    # file_out.close()
                     plt.close()
-                    # db_connection.close()
-                    # print('[CLOSED]')
                     return
             plt.close()
 
@@ -993,11 +982,7 @@ def getPrimaryForDs(args, dsname):
             except Exception as e:
                 plt.close()
                 print(f'FAILED TO WRITE IMG: {str(e)}')
-                # db_connection.close()
-                # print('[CLOSED]')
         print('\n...done\n')
-        # db_connection.close()
-        # print('[CLOSED]')
     print('*****************************************************************************\n\n\n')
 
 def readDatastreamsFromSiteTxt(site):
@@ -1005,7 +990,10 @@ def readDatastreamsFromSiteTxt(site):
     if os.path.isfile(site_datastreams_file):
         with open(site_datastreams_file, 'r') as site_datastreams:
             return site_datastreams.readlines()
-    else: print('!![ERROR]!! Failed to read site txt file: ', site_datastreams_file)
+    else:
+        err = f'!![ERROR]!! Failed to read site txt file: {site_datastreams_file}'
+        print(err)
+        sys.stderr.write(err)
 
 def buildDsPaths(site, dsnames=None):
     site_datastreams = readDatastreamsFromSiteTxt(site) if dsnames is None else dsnames
@@ -1043,22 +1031,26 @@ def buildPrimaryMeasurementDict(ds_names):
         ds_dict[ds] = []
 
     SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
-    # UPDATE_PRIMARY_MEASUREMENTS = "update arm_int2.datastream_var_name_info set thumbnail_url = %s where datastream = %s and var_name = %s"
-    dbConnection = getDBConnection()
-    dbCursor = dbConnection.cursor()
-    print('[DSNAMES]',ds_names)
-    dbCursor.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
-    results = dbCursor.fetchall()
-    # print(results)
-    for pm in results:
-        ds_dict[pm[0]].append(pm[1])
-    # print(ds_dict)
-    dbCursor.close()
-    dbConnection.close()
-    print('[CLOSED]')
-
+    conn = getDBConnection()
+    try:
+        with conn.cursor() as curs:
+            curs.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
+            results = curs.fetchall()
+        for pm in results:
+            ds_dict[pm[0]].append(pm[1])
+    finally:
+        conn.close()
+        print('[CLOSED]')
     return ds_dict
 
+def getEndDates(data_file_paths):
+    end_dates = {}
+    for path in data_file_paths:
+        modified_time = os.path.getmtime(path)
+        end_date = datetime.fromtimestamp(modified_time).strftime('%Y-%m-%d %H:%M:%S')
+        # print(f'[last_modified]::[{path}]', end_date)
+        end_dates[os.path.basename(path)] = end_date
+    return end_dates
 
 def getArgs():
     parser = argparse.ArgumentParser(description='Create GeoDisplay Plot')
@@ -1296,24 +1288,19 @@ def main(args):
         for site in sites:
             args.ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
 
-            print('[datastreams]::', args.ds_names)
             args.data_file_paths = buildDsPaths(site=site, dsnames=args.ds_names)
             args.data_file_paths = list(filter(lambda p: offsetDays(p, args.num_days), args.data_file_paths))
+            # reduce ds_names to only those within data_file_paths
             args.ds_names = [ ds for ds in args.ds_names if any(ds in path for path in args.data_file_paths) ]
             if len(args.ds_names) == 0:
                 print(f'No recent datastream files in the day range [{args.num_days}] for site [{site}]')
                 continue
-            print('[dsname len]',len(args.ds_names))
-            print('[datastream_file_paths]::', args.data_file_paths)
-            end_dates = {}
-            for path in args.data_file_paths:
-                modified_time = os.path.getmtime(path)
-                end_date = datetime.fromtimestamp(modified_time).strftime('%Y-%m-%d %H:%M:%S')
-                print('[last_modified]::[', path, ']', end_date)
-                end_dates[os.path.basename(path)] = end_date
-            args.end_dates = end_dates
-            args.pm_list = buildPrimaryMeasurementDict(args.ds_names)
+            print(f'[datastreams within {args.num_days} day(s)]', args.ds_names)
+            print(f'[total]', len(args.ds_names))
+
             args.start_date = 'current'
+            args.end_dates = getEndDates(args.data_file_paths)
+            args.pm_list = buildPrimaryMeasurementDict(args.ds_names)
 
             pool = multiprocessing.Pool(int(args.num_t))
             partial_getPrimaryForDs = partial(getPrimaryForDs, copy.deepcopy(args))
