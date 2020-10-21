@@ -1,6 +1,9 @@
 .DS_Store
-tmp/
 bu/
+lis/
+test/
+tmp/
+txt/
 
 ### STS ###
 .apt_generated
