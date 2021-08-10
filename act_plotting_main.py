@@ -7,8 +7,7 @@ import numpy as np
 import act
 import pyart
 import matplotlib.pyplot as plt
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 import json
 import glob
 import cartopy
@@ -32,6 +31,20 @@ from pathlib import Path
 import psycopg2
 from settings import DB_SETTINGS
 
+# gargs = None
+
+# class tsob(object):
+#     def __init(self):
+#         self.file_path = None
+#         self.plot = None
+#         self.dsname = None
+#         self.figsize = None
+#         self.field = None
+#         self.title = None
+#         self.add_nan = None
+#         self.show_axis = None
+#         self.out_path = None
+
 def getDBConnection():
     dbname = "dbname='" + DB_SETTINGS['dbname'] + "' "
     user = "user='" + DB_SETTINGS['user'] + "' "
@@ -45,7 +58,7 @@ def getDBConnection():
     dbConnection = None
     try:
         dbConnection = psycopg2.connect(dbString)
-        print('[OPENED]')
+        # print('[OPENED]')
     except (Exception, psycopg2.DatabaseError) as error:
         print('[ERROR] Database connection failed.', error)
         return None
@@ -89,6 +102,7 @@ def getPathStrs(dataDir):
     return pathStrs
 
 def getSortedFileIndices(startDate, dateOffset, pathStrs):
+    # print('[getSortedFileIndices]')
     dates = []
     try:
         dates = list(map(get_file_date, pathStrs))
@@ -190,6 +204,7 @@ def getPlotFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, da
     outFilePrefix = figSizeDir + '/' + outFilePrefix
 
     outPath = finalOutputDir + outFilePrefix + '.png'
+    # print(f'[inFilePrefix][{inFilePrefix}] [outFilePrefix][{outFilePrefix}] [outPath][{outPath}]')
     return outPath
 
 def combineImages(imagePaths, plot_file_path):
@@ -243,96 +258,6 @@ def insert_row(datastream, var_name, thumbnail_url, plot_url, base_out_dir, db_c
     except Exception as e:
         print(e)
         #update_row(datastream, var_name, thumbnail_url, db_connection)
-
-def getPrimaryForDatastream(dbCursor, data_stream_name, statement, args, date_offset, base_out_dir):
-    site_name = data_stream_name[0:3]
-
-    print("*****************************************************************************")
-    print("Current input directory: " + args.data_dir)
-    print("*****************************************************************************\n")
-    print("Creating plots for the following variables...\n")
-
-    result_list = getPrimaryMeasurements(statement, dbCursor)
-    if len(result_list) == 0:
-        file_out_pm = open("/tmp/no_pm.txt", "a+")
-        file_out_pm.write(args.data_dir + "\n")
-        file_out_pm.close()
-        return
-
-    out_dir = args.out_dir
-    path_strs = getPathStrs(args.data_dir)
-    current_idxs = getSortedFileIndices(args.start_date, date_offset, path_strs)
-
-    args.file_paths = []
-    args.dsname = data_stream_name
-
-    print("\nCurrent output directory: " + out_dir + "\n")
-    for current_idx in current_idxs:
-        path_in_str = path_strs[current_idx]
-
-        args.file_path = path_in_str
-        print("Current input file: " + path_in_str + "\n")
-        print("Creating output files...\n")
-
-        fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
-        fig_size_dirs = ['/.icons', '']
-
-        image_paths = []
-        plot_file_path = getPlotFilePath(site_name, data_stream_name, base_out_dir, out_dir, "", path_in_str)
-        for idx in range(0, 2):
-            for result in result_list:
-                print(args.out_path)
-
-                args.field = result
-
-                fig_size_dir = fig_size_dirs[idx]
-
-                args.out_path = getOutputFilePath(site_name, data_stream_name, base_out_dir, out_dir, fig_size_dir,
-                                                  result, path_in_str)
-                if idx == 1:
-                    image_paths.append(args.out_path)
-
-                args.figsize = fig_sizes[idx]
-
-                print(args.out_path)
-
-                insert_row(data_stream_name, result, args.out_path, plot_file_path)
-                # if (os.path.exists(args.out_path)):
-                #    continue
-                try:
-                    args.set_title = getSegmentName(path_in_str) + ": " + result
-                    args.action(args)
-                except:
-                    print("Failed to process: " + path_in_str)
-                    file_out = open("/tmp/bad_datastreams.txt", "a+")
-                    file_out.write(args.out_path + "\n")
-                    file_out.close()
-                    plt.close()
-                    return
-            plt.close()
-        if len(image_paths) > 0:
-            try:
-                combineImages(image_paths, plot_file_path)
-                # plot_file_path = getPlotFilePath(site_name, data_stream_name, base_out_dir, out_dir, "", path_in_str)
-                # if not (os.path.exists(plot_file_path)):
-                #    combineImages(image_paths, plot_file_path)
-            except Exception as e:
-                plt.close()
-                print("FAILED TO WRITE IMG: " + str(e))
-        print("\n...done\n")
-        '''
-        varDict['pm_list'] = resultList
-        try:
-            mtimeseries(args)
-        except:
-            print("Failed to process: " + path_in_str)
-            fileOut = open("failed_multi.txt", "a+")
-            fileOut.write(varDict['out_path'] + "\n")
-            fileOut.close()
-            plt.close()
-            return
-        '''
-    print("*****************************************************************************\n\n\n")
 
 def geodisplay(args):
     ds = act.io.armfiles.read_netcdf(args.file_path)
@@ -514,17 +439,20 @@ def getyrange(dsname, varname):
             curs.execute(q)
             results = curs.fetchall()
             yrange = [int(n) for n in results[0]] if results else None
-            print(f'[yrange] [{inst}] [{varname}]', yrange)
+            # print(f'[yrange] [{inst}] [{varname}]', yrange)
             return yrange
     finally:
         conn.close()
-        print('[CLOSED]')
+        # print('[CLOSED]')
 
 def timeseries(args):
+    # print(f'[timeseries][args] {args}')
+
     ds = act.io.armfiles.read_netcdf(args.file_path)
     if args.plot:
+        # print('[timeseries][plot]')
         display = act.plotting.TimeSeriesDisplay({args.dsname: ds}, figsize=args.figsize)
-        print(f'TITLE: {args.title}')
+        # print(f'TITLE: {args.title}')
         yrange = getyrange(args.dsname, args.field)
 
         display.plot(
@@ -673,83 +601,6 @@ def contour(args):
 
     ds.close()
 
-def parseStartDate(startDate):
-    try:
-        return datetime.strptime(startDate, '%Y%m%d')
-    except:
-        if startDate != 'current':
-            raise ValueError("Incorrect date format. Should be 'YYYYMMDD'. Defaulting to latest data.")
-        return 'current'
-
-def parseCsv(csvName, baseDir, baseOutDir):
-    config = []
-    with open(csvName, newline='') as configCsv:
-
-        configRows = csv.DictReader(configCsv)
-        for row in configRows:
-
-            outDir = baseOutDir + row['datastream'][:3] + '/' + row['datastream']
-            dataDir = baseDir + row['datastream'][:3] + '/' + row['datastream']
-
-            datastream = dict()
-            datastream['dir'] = dataDir
-            datastream['outDir'] = outDir
-            datastream['name'] = row['datastream']
-            datastream['range_offset'] = row['range_offset']
-
-            startDate = parseStartDate(row['start_date'])
-            if (type(startDate) is datetime):
-                datastream['startDate'] = startDate.strftime('%Y%m%d')
-            else:
-                datastream['startDate'] = 'current'
-
-            # print(datastream)
-
-            config.append(datastream)
-    return config
-
-def processBulk(args):
-    varDict = vars(args)
-    dsDir = args.ds_dir
-
-    SELECT_PRIMARY_MEASUREMENTS = "select d.var_name from datastream_var_name_info d where d.datastream = "
-
-    dbConnection = getDBConnection()
-    dbCursor = None
-    try:
-        dbCursor = dbConnection.cursor()
-    except:
-        time.sleep(3)
-        dbConnection = getDBConnection()
-        dbCursor = dbConnection.cursor()
-    args.data_dir = dsDir
-    args.out_dir = args.base_out_dir + os.path.basename(dsDir)
-    # varDict['out_dir'] = varDict['base_out_dir'] + os.path.basename(dsDir)
-    dataType = os.path.basename(dsDir)
-    args.start_date = 'current'
-    # varDict['start_date'] = 'current'
-    currentSelect = SELECT_PRIMARY_MEASUREMENTS + "'%s'" % (dataType)
-    getPrimaryForDatastream(dbCursor, dataType, currentSelect, args, 0,
-                            args.base_out_dir)
-    # getPrimaryForDatastream(dbCursor, dataType, currentSelect, varDict, args, 5,
-    #                        varDict['base_out_dir'])
-    dbConnection.close()
-
-def processSubset(args):
-    SELECT_PRIMARY_MEASUREMENTS = "select d.var_name from datastream_var_name_info d where d.datastream = "
-
-    datastream = args.datastream
-    dbConnection = getDBConnection()
-    dbCursor = dbConnection.cursor()
-    args.data_dir = datastream['dir']
-    args.out_dir = datastream['outDir']
-    dataType = datastream['name']
-    args.start_date = datastream['startDate']
-    currentSelect = SELECT_PRIMARY_MEASUREMENTS + "'%s'" % (dataType)
-    getPrimaryForDatastream(dbCursor, dataType, currentSelect, args, datastream['range_offset'],
-                            args.base_out_dir)
-    dbConnection.close()
-
 def getOutputUrl(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, pmResult, dataFilePath):
     dataFname = os.path.basename(dataFilePath)
     splitDFname = dataFname.split('.')
@@ -761,7 +612,7 @@ def getOutputUrl(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, pmRes
     yearMonth = str(dFStr.year) + monthStr
     dateDir = splitDFname[0] + '.' + splitDFname[1] + '.' + yearMonth
 
-    urlStr = 'https://www.archive.arm.gov/quicklooks/'
+    urlStr = 'https://adc.arm.gov/quicklooks/'
     finalOutputDir = urlStr + str(dFStr.year) + '/' + siteName + '/' + dataStreamName + '/' + dateDir
 
     inFilePrefix = str(os.path.basename(os.path.normpath(dataFilePath)))
@@ -833,6 +684,7 @@ def insert_qls_info(q, conn, table):
         pass
 
 def getPrimaryForDs(args, dsname):
+    # print('[[getPrimaryForDs]]')
     print(f'[{dsname}]')
     args.dsname = dsname # required for other methods to find the dsname
     args.ds_dir = args.data_file_paths[args.ds_names.index(dsname)]
@@ -846,6 +698,9 @@ def getPrimaryForDs(args, dsname):
     print('Creating plots for the following variables...\n')
 
     path_strs = getPathStrs(args.ds_dir)
+    print('[path_strs]')
+    print(path_strs)
+    print('------------------------------------')
 
     # print('[before filter]', len(path_strs))
     # path_strs = list(filter(offsetDays, path_strs))
@@ -856,17 +711,25 @@ def getPrimaryForDs(args, dsname):
         return
 
     current_idxs = getSortedFileIndices(args.start_date, args.num_days, path_strs)
+    # print(f'[current_idxs] {current_idxs}')
 
     # args.file_paths = [] # don't think this is needed
     print(f'\nCurrent output directory: {out_dir}\n')
 
     for current_idx in current_idxs:
+        idx_started = datetime.now()
         path_in_str = path_strs[current_idx]
         args.file_path = path_in_str # needed for plotting methods
 
-        if os.path.getsize(path_in_str) > args.max_file_size: # exclude if file size is > 100MB
-            print(f'File too large: {path_in_str} :', os.path.getsize(path_in_str))
+        # calcsize_started = datetime.now()
+        # print('[calcsize started]')
+        fsize = os.path.getsize(path_in_str)
+        if fsize > args.max_file_size: # exclude if file size is > 100MB
+            print(f'File too large: {path_in_str} :', fsize)
             continue
+        # else: print(f'[filesize] {fsize}')
+        # elapsed_time = datetime.now() - calcsize_started
+        # print('[calcsize time] {}\n\n'.format(elapsed_time))
 
         print(f'Current input file: {path_in_str}')
         print('Creating output files...\n')
@@ -874,10 +737,17 @@ def getPrimaryForDs(args, dsname):
         fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
         fig_size_dirs = ['/.icons', '']
 
-        row_components = []
         image_paths = []
         plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
+        print(f'[plot_file_path] {plot_file_path}')
+        print(f'[primary_measurements] [{len(result_list)}] {result_list}')
+
+        # runs for smaller size `fig_sizes[0]`, then again for larger `fig_sizes[1]`
         for idx in range(0, 2):
+            if idx == 1:
+                print('---[Full Images]---')
+            else: print('---[Thumbnails]---')
+
             for result in result_list:
                 args.field = result # required for timeseries plotting method
                 fig_size_dir = fig_size_dirs[idx]
@@ -901,7 +771,7 @@ def getPrimaryForDs(args, dsname):
                             insert_qls_info(giri_inventory_insert_query, conn, 'giri_inventory')
                     finally:
                         conn.close()
-                        print('[CLOSED]')
+                        # print('[CLOSED]')
                     continue
                 try:
                     if idx == 1:
@@ -910,29 +780,40 @@ def getPrimaryForDs(args, dsname):
                     else:
                         args.title = ""
                         args.show_axis = 'off'
-                        row_component = {'segment_name': getSegmentName(path_in_str), 'var_name': result,
-                                         'out_path': args.out_path, 'plot_path': plot_file_path}
-                        row_components.append(row_component)
-                    args.action(args) # now executes any methods flagged from command line args
+                    try:
+                        # action_started = datetime.now()
+                        args.action(args) # now executes any methods flagged from command line args
+                        # action_time = datetime.now() - action_started
+                        # print(f'[time][ACTION] {action_time}')
+                    except:
+                        print(f'[[[FAILED args.action]]] {path_in_str}')
                 except Exception as e:
                     print(f'FAILED PROCESS: {str(e)}')
                     print(f'Failed to process: {path_in_str}')
-                    with open('/tmp/bad_datastreams.txt', 'a+') as file_out:
-                        file_out.write(args.out_path + '\n')
+                    if os.access('/tmp/bad_datastreams.txt', os.W_OK):
+                        with open('/tmp/bad_datastreams.txt', 'a+') as file_out:
+                            file_out.write(args.out_path + '\n')
                     plt.close()
                     return
             plt.close()
 
         if len(image_paths) > 0:
             try:
+                combine_started = datetime.now()
                 combineImages(image_paths, plot_file_path)
                 plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
                 print(f'[plot_file_path] {plot_file_path}')
                 if not (os.path.exists(plot_file_path)):
+                    # print('')
                     combineImages(image_paths, plot_file_path)
+                elapsed_time = datetime.now() - combine_started
+                print(f'[time][CombineImages] {elapsed_time}\n\n')
+
             except Exception as e:
                 plt.close()
                 print(f'FAILED TO WRITE IMG: {str(e)}')
+        idx_time = datetime.now() - idx_started
+        print(f'[time][idx] {idx_time}')
         print('\n...done\n')
     print('*****************************************************************************\n\n\n')
 
@@ -976,6 +857,7 @@ def buildPrimaryMeasurementDict(ds_names):
         ds_dict[ds] = []
 
     SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
+    # print(f'[SELECT_PRIMARY_MEASUREMENTS] {SELECT_PRIMARY_MEASUREMENTS} {(tuple(ds_names),)}')
     conn = getDBConnection()
     try:
         with conn.cursor() as curs:
@@ -983,9 +865,11 @@ def buildPrimaryMeasurementDict(ds_names):
             results = curs.fetchall()
         for pm in results:
             ds_dict[pm[0]].append(pm[1])
+            print('pm: ', pm)
     finally:
         conn.close()
-        print('[CLOSED]')
+        # print('[CLOSED]')
+    print(f'[ds_dict] {ds_dict}')
     return ds_dict
 
 def getEndDates(data_file_paths):
@@ -1232,6 +1116,7 @@ def main(args):
         print('-- reading datastreams from site txt --')
         for site in sites:
             args.ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
+            # print(f'[args.ds_names] {args.ds_names}')
             if args.ds_names is None: continue
 
             args.data_file_paths = [os.path.join('/data/archive/', site, ds.strip()) for ds in args.ds_names]
@@ -1246,7 +1131,13 @@ def main(args):
 
             args.start_date = 'current'
             args.end_dates = getEndDates(args.data_file_paths)
+
+            print(f'[args.ds_names] {args.ds_names}')
+
+            # pmdict_started = datetime.now()
             args.pm_list = buildPrimaryMeasurementDict(args.ds_names)
+            # elapsed_time = datetime.now() - pmdict_started
+            # print(f'[time][buildPrimaryMeas] {elapsed_time}\n\n')
 
             pool = multiprocessing.Pool(int(args.num_t))
             partial_getPrimaryForDs = partial(getPrimaryForDs, copy.deepcopy(args))
@@ -1266,10 +1157,13 @@ def main(args):
     print('This should be one of the last thing printed.')
 
 if __name__ == '__main__':
+    # global gargs
     started = datetime.now()
     print('[BEGIN]', started,'\n--------------------------------------------\n')
     args = getArgs()
+    # gargs = args
+
     main(args)
     print('Done with all!\n')
     elapsed_time = datetime.now() - started
-    print('[Processing time] {}\n\n'.format(elapsed_time))
+    print(f'[Processing time] {elapsed_time}\n\n')
