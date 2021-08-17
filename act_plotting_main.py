@@ -738,6 +738,8 @@ def processPm(args, site_name, dsname, out_dir, path_in_str, pm):
             finally:
                 action_time = datetime.now() - action_started
                 print(f'[time][ACTION] {action_time}')
+                with open('out/times.txt', 'a+') as f:
+                    print(f'[action][{action_time}][{path_in_str.split("/")[-1]}][{result}][{"thumb" if idx == 0 else ""}]', file=f)
         except Exception as e:
             print(f'FAILED PROCESS: {str(e)}')
             print(f'Failed to process: {path_in_str}')
@@ -792,21 +794,18 @@ def getPrimaryForDs(args, dsname):
     print(f'[current_idxs] {current_idxs}')
     num_to_process = len(current_idxs)
     print(f'[files-to-process] [{num_to_process}]')
+    print(f'[total-measurements] [{len(result_list)}]')
+    print(f'[pngs-to-generate] [{num_to_process * len(result_list) * 2}]')
 
     # args.file_paths = [] # don't think this is needed
     print(f'\nCurrent output directory: {out_dir}\n')
 
-    # TODO: try to use multiprocess.Process on each file then the Pool on each measurement
-    #   part = partial(processFile)
-    # TODO: try this as a numpy array with the new sorted indices
-    #   data_file_paths = np.array(path_strs)[current_idxs]
-    #   for data_file_path in data_file_paths:
-    #       #path_in_str===data_file_paths
-    #       #the rest
+    # TODO: Rework this using functools.product and starmap
 
-    for current_idx in current_idxs:
+    data_file_paths = np.array(path_strs)[current_idxs]
+    for data_file_path in data_file_paths:
         idx_started = datetime.now()
-        path_in_str = path_strs[current_idx]
+        path_in_str = data_file_path
         args.file_path = path_in_str # needed for plotting methods
 
         # calcsize_started = datetime.now()
@@ -831,9 +830,9 @@ def getPrimaryForDs(args, dsname):
         # print(f'[primary_measurements] [{len(result_list)}] {result_list}')
 
         part = partial(processPm, copy.deepcopy(args), site_name, dsname, out_dir, path_in_str)
-        # with multiprocessing.Pool(int(args.num_t)) as pool:
-        pool = multiprocessing.Pool(int(args.num_t))
-        image_paths = pool.map(part, result_list)
+        with multiprocessing.Pool(int(args.num_t)) as pool:
+            image_paths = pool.map(part, result_list)
+
         # runs for smaller size `fig_sizes[0]`, then again for larger `fig_sizes[1]`
         # for idx in range(0, 2):
         #     if idx == 1:
@@ -894,7 +893,7 @@ def getPrimaryForDs(args, dsname):
             # print(image_paths)
             # print('===============IMAGE PATHS=========================')
             try:
-                combine_started = datetime.now()
+                # combine_started = datetime.now()
                 combineImages(image_paths, plot_file_path)
                 plot_file_path2 = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
                 if plot_file_path2 != plot_file_path:
@@ -903,8 +902,8 @@ def getPrimaryForDs(args, dsname):
                 if not (os.path.exists(plot_file_path)):
                     print(f'[FAILED] Did not create file in [{plot_file_path}]')
                     combineImages(image_paths, plot_file_path)
-                elapsed_time = datetime.now() - combine_started
-                print(f'[time][CombineImages] {elapsed_time}\n\n')
+                # elapsed_time = datetime.now() - combine_started
+                # print(f'[time][CombineImages] {elapsed_time}\n\n')
 
             except Exception as e:
                 plt.close()
@@ -1204,15 +1203,6 @@ def getArgs():
     parser.add_argument('-hs', '--histogram', dest='action',
                         action='store_const', const=histogram)
     return parser.parse_args()
-
-def test2(args, pm):
-    print(f'[test2][pm][{pm}]')
-def teststuff(args, ds, pm):
-    print(f'[ds][{ds} [pm][{pm}')
-    part = partial(test2, copy.deepcopy(args))
-    with multiprocessing.Pool(int(args.num_t)) as pool:
-        pool.map(part, pm)
-
 
 
 def main(args):
