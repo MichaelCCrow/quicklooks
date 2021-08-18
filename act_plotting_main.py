@@ -18,6 +18,7 @@ import math
 import sys
 from PIL import Image
 import multiprocessing
+from itertools import product, groupby
 import time
 import re
 
@@ -145,9 +146,15 @@ def getOutputFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, 
     finalOutputDir = baseOutDir + str(dFStr.year) + '/' + siteName + '/' + dataStreamName + '/' + dateDir
     print(finalOutputDir)
     if not os.path.exists(finalOutputDir):
-        os.makedirs(finalOutputDir)
+        try:
+            os.makedirs(finalOutputDir)
+        except FileExistsError:
+            pass
     if not os.path.exists(finalOutputDir + '/.icons'):
-        os.makedirs(finalOutputDir + '/.icons')
+        try:
+            os.makedirs(finalOutputDir + '/.icons')
+        except FileExistsError:
+            pass
 
     inFilePrefix = str(os.path.basename(os.path.normpath(dataFilePath)))
     outFilePrefix = inFilePrefix.replace(".nc", ".")
@@ -686,9 +693,16 @@ def insert_qls_info(q, conn, table):
 fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
 fig_size_dirs = ['/.icons', '']
 
-def processPm(args, site_name, dsname, out_dir, path_in_str, pm):
+def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
+# def processPm(args, site_name, dsname, out_dir, path_in_str, pm):
+# def processPm(args, path_in_str, pm):
     image_paths = []
     imgpath = ''
+    args.file_path = data_file_path
+    fsize = os.path.getsize(data_file_path)
+    if fsize > args.max_file_size: # exclude if file size is > 100MB
+        print(f'File too large: {data_file_path} :', fsize)
+        return
     for idx in range(0, 2):
         if idx == 1:
             print('---[Full Images]---')
@@ -700,16 +714,12 @@ def processPm(args, site_name, dsname, out_dir, path_in_str, pm):
         args.field = result  # required for timeseries plotting method
         fig_size_dir = fig_size_dirs[idx]
         args.out_path = getOutputFilePath(site_name, dsname, args.base_out_dir, out_dir, fig_size_dir,
-                                          result, path_in_str)
-        if idx == 1:
-            imgpath = args.out_path
-            # image_paths.append(args.out_path)
-
+                                          result, data_file_path)
         args.figsize = fig_sizes[idx]
         print(f'[out_path] {args.out_path}')
 
         if os.path.exists(args.out_path):
-            urlStr = getOutputUrl(site_name, dsname, args.base_out_dir, out_dir, fig_size_dir, result, path_in_str)
+            urlStr = getOutputUrl(site_name, dsname, args.base_out_dir, out_dir, fig_size_dir, result, data_file_path)
             print(f'URL STRING: {urlStr}')
             pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, result, urlStr,
                                                                        endDate=args.end_dates[dsname])
@@ -725,7 +735,7 @@ def processPm(args, site_name, dsname, out_dir, path_in_str, pm):
             continue
         try:
             if idx == 1:
-                args.title = getSegmentName(path_in_str) + " " + result
+                args.title = getSegmentName(data_file_path) + " " + result
                 args.show_axis = 'on'
             else:
                 args.title = ""
@@ -733,16 +743,19 @@ def processPm(args, site_name, dsname, out_dir, path_in_str, pm):
             action_started = datetime.now()
             try:
                 args.action(args)  # now executes any methods flagged from command line args
-            except:
-                print(f'[[[FAILED args.action]]] {path_in_str}')
+                if idx == 1:
+                    imgpath = args.out_path
+            except Exception as e:
+                print(f'[[[FAILED args.action]]] {data_file_path}')
+                print(f'[ERROR][REASON][{e}]')
             finally:
                 action_time = datetime.now() - action_started
                 print(f'[time][ACTION] {action_time}')
                 with open('out/times.txt', 'a+') as f:
-                    print(f'[action][{action_time}][{path_in_str.split("/")[-1]}][{result}][{"thumb" if idx == 0 else ""}]', file=f)
+                    print(f'[action][{action_time}][{data_file_path.split("/")[-1]}][{result}][{"thumb" if idx == 0 else ""}]', file=f)
         except Exception as e:
             print(f'FAILED PROCESS: {str(e)}')
-            print(f'Failed to process: {path_in_str}')
+            print(f'Failed to process: {data_file_path}')
             if os.access('/tmp/bad_datastreams.txt', os.W_OK):
                 with open('/tmp/bad_datastreams.txt', 'a+') as file_out:
                     file_out.write(args.out_path + '\n')
@@ -751,18 +764,27 @@ def processPm(args, site_name, dsname, out_dir, path_in_str, pm):
     plt.close()
     return imgpath
 
-# def processFile(args, path_in_str):
-#     args.file_path = path_in_str  # needed for plotting methods
-#     fsize = os.path.getsize(path_in_str)
-#     if fsize > args.max_file_size:  # exclude if file size is > 100MB
-#         print(f'File too large: {path_in_str} :', fsize)
-#         continue
-
+def combine(image_paths):
+    if len(image_paths) <= 0:
+        print('[combine][len<=0]')
+        return
+    plot_file_path = re.sub('([a-z_]+)(?=\.png)', '', image_paths[0]).replace('..', '.')
+    print(f'[combine][total][{len(image_paths)}] -> [{plot_file_path}]')
+    # plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
+    try:
+        combineImages(image_paths, plot_file_path)
+        if not (os.path.exists(plot_file_path)):
+            errmsg = f'[FAILED] Did not create file in [{plot_file_path}]'
+            print(errmsg)
+            with open('logs/err/combine.err', 'a+') as f:
+                print(errmsg, file=f)
+            combineImages(image_paths, plot_file_path)
+    except Exception as e:
+        plt.close()
+        print(f'FAILED TO WRITE IMG: {str(e)}')
 
 # def getPrimaryForDs(args, dsname, result_list): # used with multiprocessing.Process approach
 def getPrimaryForDs(args, dsname):
-    # print('[[getPrimaryForDs]]')
-    # dsname = result_list
     print(f'[{dsname}]')
     args.dsname = dsname # required for other methods to find the dsname
     args.ds_dir = args.data_file_paths[args.ds_names.index(dsname)]
@@ -778,13 +800,6 @@ def getPrimaryForDs(args, dsname):
     # The list of cdf files to process
     path_strs = getPathStrs(args.ds_dir)
     print(f'[total data files] {len(path_strs)}')
-    # print('[path_strs]')
-    # print(path_strs)
-    # print('------------------------------------')
-
-    # print('[before filter]', len(path_strs))
-    # path_strs = list(filter(offsetDays, path_strs))
-    # print('[after filter]', len(path_strs))
 
     if len(path_strs) == 0:
         print(f'No new files for datastream [{dsname}]')
@@ -800,31 +815,43 @@ def getPrimaryForDs(args, dsname):
     # args.file_paths = [] # don't think this is needed
     print(f'\nCurrent output directory: {out_dir}\n')
 
-    # TODO: Rework this using functools.product and starmap
-
     data_file_paths = np.array(path_strs)[current_idxs]
-    for data_file_path in data_file_paths:
+
+    partial_processPm = partial(processPm, copy.deepcopy(args), site_name, out_dir, dsname)
+    dfp = product(data_file_paths, result_list)
+
+    with multiprocessing.Pool(int(args.num_t)) as pool:
+        image_paths = pool.starmap(partial_processPm, dfp)
+        image_paths = [ i for i in image_paths if i ]
+        image_paths.sort()
+        image_paths = [list(i) for j, i in groupby(image_paths,
+                                            lambda a: re.search('([a-zA-Z0-9]+\.[a-z0-9]{2}\.\d{8})', a).group())]
+        print('-----------------------IMAGE PATHS---------------------')
+        print(image_paths)
+        print('=======================================================')
+        if len(image_paths) > 0: # and image_paths[0] is not None:
+            pool.map(combine, image_paths)
+
+    # with multiprocessing.Pool(int(args.num_t)) as pool:
+    #     pool.map(combineImages, )
+
+    for data_file_path in range(0):
+    # for data_file_path in data_file_paths:
         idx_started = datetime.now()
         path_in_str = data_file_path
-        args.file_path = path_in_str # needed for plotting methods
+        args.file_path = data_file_path # needed for plotting methods
 
         # calcsize_started = datetime.now()
-        # print('[calcsize started]')
         fsize = os.path.getsize(path_in_str)
         if fsize > args.max_file_size: # exclude if file size is > 100MB
             print(f'File too large: {path_in_str} :', fsize)
             continue
-        # else: print(f'[filesize] {fsize}')
         # elapsed_time = datetime.now() - calcsize_started
         # print('[calcsize time] {}\n\n'.format(elapsed_time))
 
         print(f'Current input file: {path_in_str}')
         print('Creating output files...\n')
 
-        fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
-        fig_size_dirs = ['/.icons', '']
-
-        # image_paths = []
         plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
         # print(f'[plot_file_path] {plot_file_path}')
         # print(f'[primary_measurements] [{len(result_list)}] {result_list}')
