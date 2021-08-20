@@ -701,6 +701,37 @@ def filter_bad_matches(ds, pm):
         return (ds, pm)
     else: log.debug(f'[pm not in cdf] {pm} {ds}')
 
+def readDatastreamsFromSiteTxt(site):
+    site_datastreams_file = site+'.txt'
+    if os.path.isfile(site_datastreams_file):
+        with open(site_datastreams_file, 'r') as site_datastreams:
+            return site_datastreams.readlines()
+    else:
+        err = f'!![ERROR]!! Failed to read site txt file: {site_datastreams_file}'
+        log.error(err)
+        sys.stderr.write(err)
+
+def buildPrimaryMeasurementDict(ds_names):
+    ds_dict = {}
+    for ds in ds_names:
+        ds_dict[ds] = []
+
+    SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
+    log.trace(f'[SELECT_PRIMARY_MEASUREMENTS] {SELECT_PRIMARY_MEASUREMENTS} {(tuple(ds_names),)}')
+
+    conn = getDBConnection()
+    try:
+        with conn.cursor() as curs:
+            curs.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
+            results = curs.fetchall()
+        for pm in results:
+            ds_dict[pm[0]].append(pm[1])
+            # log.info(f'pm: {pm}')
+    finally:
+        conn.close()
+        # print('[CLOSED]')
+    return ds_dict
+
 
 def combine(image_paths):
     if len(image_paths) <= 0:
@@ -841,9 +872,7 @@ def getPrimaryForDs(args, dsname):
     #                    r in act.io.armfiles.read_netcdf(file_path).data_vars.keys()]
     partial_processPm = partial(processPm, copy.deepcopy(args), site_name, out_dir, dsname)
 
-    # TODO: Use multiprocessing.Value to monitor the progress
-    #   with counter.get_lock():
-    #     counter.value += 1
+    # TODO: Use monitor the progress by counting the number of completed datastreams
     with multiprocessing.Pool(int(args.num_t)) as pool:
         img_started = datetime.now()
         image_paths = pool.starmap(partial_processPm, product(data_file_paths, pm_list))
@@ -859,61 +888,6 @@ def getPrimaryForDs(args, dsname):
             pool.map(combine, image_paths)
         else:
             log.warning(f'[No plots generated for datastream] [{dsname}]')
-
-def readDatastreamsFromSiteTxt(site):
-    site_datastreams_file = site+'.txt'
-    if os.path.isfile(site_datastreams_file):
-        with open(site_datastreams_file, 'r') as site_datastreams:
-            return site_datastreams.readlines()
-    else:
-        err = f'!![ERROR]!! Failed to read site txt file: {site_datastreams_file}'
-        log.error(err)
-        sys.stderr.write(err)
-
-def oldwayGetDsNames(sites):
-    def getSelectedSitePaths(sites):
-        data_archive_path = '/data/archive/'
-        data_archive_dirs = [os.path.join(data_archive_path, o) for o in os.listdir(data_archive_path) if
-                             os.path.isdir(os.path.join(data_archive_path, o))]
-        data_archive_dirs = list(filter(remove_raw_DS, data_archive_dirs))
-        return [site for site in data_archive_dirs if os.path.basename(site) in sites]
-
-    selected_sites = getSelectedSitePaths(sites)
-    for site_path in selected_sites:
-        print(str(os.path.basename(site_path)))
-        site_path_dirs = [os.path.join(site_path, o) for o in os.listdir(site_path) if
-                          os.path.isdir(os.path.join(site_path, o))]
-
-        data_file_paths = list(map(str, site_path_dirs)) # /data/archive/site_code/datastream.lvl
-        data_file_paths = list(filter(remove_raw_DS, data_file_paths))
-
-        ds_names = list(map(get_data_stream_name, data_file_paths))
-        ds_names = list(filter(remove_raw_DS, ds_names))
-        # if args.use_txt_file and datastream_txt_files:
-        #     ds_names = list(filter(lambda ds : ds in datastream_txt_files[ds[:3]], ds_names))
-        print(ds_names)
-        return ds_names, data_file_paths
-
-def buildPrimaryMeasurementDict(ds_names):
-    ds_dict = {}
-    for ds in ds_names:
-        ds_dict[ds] = []
-
-    SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
-    log.trace(f'[SELECT_PRIMARY_MEASUREMENTS] {SELECT_PRIMARY_MEASUREMENTS} {(tuple(ds_names),)}')
-
-    conn = getDBConnection()
-    try:
-        with conn.cursor() as curs:
-            curs.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
-            results = curs.fetchall()
-        for pm in results:
-            ds_dict[pm[0]].append(pm[1])
-            # log.info(f'pm: {pm}')
-    finally:
-        conn.close()
-        # print('[CLOSED]')
-    return ds_dict
 
 
 def getArgs():
@@ -1147,7 +1121,6 @@ def getArgs():
 def main(args):
     sites = args.site_list.split(',')
     log.info('[sites]', sites)
-
 
     if not args.use_txt_file:
         print(
