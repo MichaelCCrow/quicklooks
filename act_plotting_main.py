@@ -67,15 +67,6 @@ def getDateStr(dateObj):
 def getStartDate(dates, selectedDate):
     return min(dates, key=lambda currDate: abs(currDate - selectedDate))
 
-def getPrimaryMeasurements(statement, dbCursor):
-    dbCursor.execute(statement)
-
-    resultList = []
-    for result in dbCursor:
-        resultList.append(list(result)[0])
-        print(list(result)[0])
-    return resultList
-
 def offsetDays(file, days=1):
     file = Path(file)
     offset = datetime.fromtimestamp(file.stat().st_mtime) + timedelta(days=int(days))
@@ -444,13 +435,7 @@ def getyrange(dsname, varname):
 
 def timeseries(args):
     ds = act.io.armfiles.read_netcdf(args.file_path)
-    # if args.field not in ds.data_vars.keys():
-    #     log.warning(f'[SKIPPING][measurement-not-in-cdf] [{args.field}] [{os.path.basename(args.file_path)}]')
-    #     ds.close()
-    #     return False
-
     if args.plot:
-        # print('[timeseries][plot]')
         display = act.plotting.TimeSeriesDisplay({args.dsname: ds}, figsize=args.figsize)
         # print(f'TITLE: {args.title}')
         yrange = getyrange(args.dsname, args.field)
@@ -510,7 +495,6 @@ def timeseries(args):
         plt.close(display.fig)
 
     ds.close()
-    # return True
 
 def histogram(args):
     ds = act.io.armfiles.read_netcdf(args.file_path)
@@ -757,6 +741,12 @@ def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
     idx_started = datetime.now()
     log.debug(f'[{data_file_path.split("/")[5]}] [{pm}]')
 
+    args.file_path = data_file_path # required for timeseries function
+    fsize = os.path.getsize(data_file_path)
+    if fsize > args.max_file_size:  # exclude if file size is > 100MB
+        log.warning(f'File too large: {data_file_path} : [{fsize}]')
+        return
+
     try:
         check_started = datetime.now()
         dscdf = act.io.armfiles.read_netcdf(data_file_path)
@@ -767,14 +757,10 @@ def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
     except Exception as e:
         log.critical(f'[FAILED][checking for measurements in cdf file] {data_file_path} [REASON] {e}')
     finally:
+        dscdf.close()
         check_ended = datetime.now() - check_started
         log.trace(f'[time][check-if-measurement-in-cdf-file] [{check_ended}]')
 
-    args.file_path = data_file_path
-    fsize = os.path.getsize(data_file_path)
-    if fsize > args.max_file_size: # exclude if file size is > 100MB
-        log.warning(f'File too large: {data_file_path} : [{fsize}]')
-        return
 
     imgpath = ''
 
@@ -872,7 +858,7 @@ def getPrimaryForDs(args, dsname):
     #                    r in act.io.armfiles.read_netcdf(file_path).data_vars.keys()]
     partial_processPm = partial(processPm, copy.deepcopy(args), site_name, out_dir, dsname)
 
-    # TODO: Use monitor the progress by counting the number of completed datastreams
+    # TODO: Monitor the progress by counting the number of completed datastreams
     with multiprocessing.Pool(int(args.num_t)) as pool:
         img_started = datetime.now()
         image_paths = pool.starmap(partial_processPm, product(data_file_paths, pm_list))
