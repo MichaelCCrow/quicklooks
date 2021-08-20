@@ -703,7 +703,6 @@ def processPm(args, dsname, data_file_path, pm):
         return
 
     try:
-        # check_started = datetime.now()
         dataset = act.io.armfiles.read_netcdf(data_file_path)
         if pm not in dataset.data_vars.keys():
             log.debug(f'[SKIPPING][measurement-not-in-cdf] [{pm}] [{os.path.basename(data_file_path)}]')
@@ -714,9 +713,6 @@ def processPm(args, dsname, data_file_path, pm):
         log.critical(f'[FAILED][checking for measurements in cdf file] {data_file_path} [REASON] {e}')
         dataset.close()
         return
-    # finally:
-    #     check_ended = datetime.now() - check_started
-    #     log.trace(f'[time][check-if-measurement-in-cdf-file] [{check_ended}]')
 
     imgpath = ''
     site_name = dsname[0:3]
@@ -740,43 +736,44 @@ def processPm(args, dsname, data_file_path, pm):
             pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, pm, urlStr, endDate=args.end_dates[dsname])
             giri_inventory_insert_query = createGiriInsert(dsname, pm, endDate=args.end_dates[dsname])
             conn = getDBConnection()
-            try:
-                with conn:
-                    insert_qls_info(pre_selected_qls_info_insert_query, conn, 'pre_selected_qls_info')
-                    insert_qls_info(giri_inventory_insert_query, conn, 'giri_inventory')
-            finally:
-                conn.close()
-                # print('[CLOSED]')
+            with conn:
+                insert_qls_info(pre_selected_qls_info_insert_query, conn, 'pre_selected_qls_info')
+                insert_qls_info(giri_inventory_insert_query, conn, 'giri_inventory')
+            conn.close()
             continue
 
+        if idx == 1:
+            args.title = getSegmentName(data_file_path) + " " + pm
+            args.show_axis = 'on'
+        else:
+            args.title = ""
+            args.show_axis = 'off'
+        action_started = datetime.now()
         try:
+            args.action(args)  # now executes any methods flagged from command line args
             if idx == 1:
-                args.title = getSegmentName(data_file_path) + " " + pm
-                args.show_axis = 'on'
-            else:
-                args.title = ""
-                args.show_axis = 'off'
-            action_started = datetime.now()
-            try:
-                args.action(args)  # now executes any methods flagged from command line args
-                if idx == 1:
-                    imgpath = args.out_path
-                log.info(f'[plot-generated] {args.out_path}')
-            except Exception as e:
-                errmsg = f'[FAILED][args.action] [{data_file_path}] [{pm}] -- [REASON] [{e}]'
-                log.error(errmsg)
-                with open('logs/bad_datastreams.txt', 'a+') as f:
-                    print(errmsg, file=f)
-            finally:
-                action_time = datetime.now() - action_started
-                log.trace(f'[time][ACTION] {action_time}')
+                imgpath = args.out_path
+            log.info(f'[plot-generated] {args.out_path}')
         except Exception as e:
-            log.error(f'[FAILED to PROCESS] {data_file_path} [REASON] {str(e)}')
+            errmsg = f'[FAILED] [{data_file_path}] [{pm}] -- [REASON] [{e}]'
+            log.error(errmsg)
             if os.access('/tmp/bad_datastreams.txt', os.W_OK):
                 with open('/tmp/bad_datastreams.txt', 'a+') as file_out:
                     print(args.out_path, file=file_out)
-            plt.close()
-            return
+            else:
+                with open('logs/bad_datastreams.txt', 'a+') as f:
+                    print(errmsg, file=f)
+        finally:
+            action_time = datetime.now() - action_started
+            log.trace(f'[time][plot-generation] {action_time}')
+
+        # except Exception as e:
+        #     log.error(f'[FAILED to PROCESS] {data_file_path} [REASON] {str(e)}')
+        #     if os.access('/tmp/bad_datastreams.txt', os.W_OK):
+        #         with open('/tmp/bad_datastreams.txt', 'a+') as file_out:
+        #             print(args.out_path, file=file_out)
+        #     plt.close()
+        #     return
     plt.close()
 
     idx_time = datetime.now() - idx_started
