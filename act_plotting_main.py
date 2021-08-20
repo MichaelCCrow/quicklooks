@@ -388,11 +388,13 @@ def getyrange(dsname, varname):
         # print('[CLOSED]')
 
 def timeseries(args):
-    ds = act.io.armfiles.read_netcdf(args.file_path)
+    # ds = act.io.armfiles.read_netcdf(args.file_path)
+    ds = args.dataset
     if args.plot:
         display = act.plotting.TimeSeriesDisplay({args.dsname: ds}, figsize=args.figsize)
         # print(f'TITLE: {args.title}')
-        yrange = getyrange(args.dsname, args.field)
+        # yrange = getyrange(args.dsname, args.field)
+        yrange = args.yrange
 
         display.plot(
             field=args.field, dsname=args.dsname, set_title=args.title, add_nan=args.add_nan,
@@ -701,22 +703,27 @@ def processPm(args, dsname, data_file_path, pm):
         return
 
     try:
-        check_started = datetime.now()
-        dscdf = act.io.armfiles.read_netcdf(data_file_path)
-        if pm not in dscdf.data_vars.keys():
+        # check_started = datetime.now()
+        dataset = act.io.armfiles.read_netcdf(data_file_path)
+        if pm not in dataset.data_vars.keys():
             log.debug(f'[SKIPPING][measurement-not-in-cdf] [{pm}] [{os.path.basename(data_file_path)}]')
-            dscdf.close()
+            dataset.close()
             return
+        args.dataset = dataset
     except Exception as e:
         log.critical(f'[FAILED][checking for measurements in cdf file] {data_file_path} [REASON] {e}')
-    finally:
-        dscdf.close()
-        check_ended = datetime.now() - check_started
-        log.trace(f'[time][check-if-measurement-in-cdf-file] [{check_ended}]')
+        dataset.close()
+        return
+    # finally:
+    #     check_ended = datetime.now() - check_started
+    #     log.trace(f'[time][check-if-measurement-in-cdf-file] [{check_ended}]')
 
     imgpath = ''
     site_name = dsname[0:3]
-    args.field = pm  # required for timeseries plotting method
+
+    # required for timeseries plotting method
+    args.field = pm
+    args.yrange = getyrange(dsname, pm)
 
     # TODO: Figure out how to remove the necessity for a loop
     for idx in range(2):
@@ -729,6 +736,7 @@ def processPm(args, dsname, data_file_path, pm):
         if os.path.exists(args.out_path):
             urlStr = getOutputUrl(site_name, dsname, args.base_out_dir, fig_size_dir, pm, data_file_path)
             log.trace(f'[URL STRING] {urlStr}')
+
             pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, pm, urlStr, endDate=args.end_dates[dsname])
             giri_inventory_insert_query = createGiriInsert(dsname, pm, endDate=args.end_dates[dsname])
             conn = getDBConnection()
@@ -740,6 +748,7 @@ def processPm(args, dsname, data_file_path, pm):
                 conn.close()
                 # print('[CLOSED]')
             continue
+
         try:
             if idx == 1:
                 args.title = getSegmentName(data_file_path) + " " + pm
