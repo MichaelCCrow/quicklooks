@@ -165,34 +165,6 @@ def getSegmentName(dataFilePath):
 
     return dateDir
 
-def getPlotFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, dataFilePath):
-    dataFname = os.path.basename(dataFilePath)
-    splitDFname = dataFname.split('.')
-    dFStr = datetime.strptime(splitDFname[2], '%Y%m%d')
-
-    monthStr = str(dFStr.month)
-    if len(monthStr) == 1:
-        monthStr = "0" + monthStr
-
-    yearMonth = str(dFStr.year) + monthStr
-    dateDir = splitDFname[0] + '.' + splitDFname[1] + '.' + yearMonth
-
-    finalOutputDir = baseOutDir + str(dFStr.year) + '/' + siteName + '/' + dataStreamName + '/' + dateDir
-    log.info('[finalOutputDir] ', finalOutputDir)
-    if not os.path.exists(finalOutputDir):
-        os.makedirs(finalOutputDir)
-    if not os.path.exists(finalOutputDir + '/.icons'):
-        os.makedirs(finalOutputDir + '/.icons')
-
-    inFilePrefix = str(os.path.basename(os.path.normpath(dataFilePath)))
-    outFilePrefix = inFilePrefix.replace(".nc", "")
-    outFilePrefix = outFilePrefix.replace(".cdf", "")
-    outFile = outDir + '/' + outFilePrefix
-    outFilePrefix = figSizeDir + '/' + outFilePrefix
-
-    outPath = finalOutputDir + outFilePrefix + '.png'
-    # print(f'[inFilePrefix][{inFilePrefix}] [outFilePrefix][{outFilePrefix}] [outPath][{outPath}]')
-    return outPath
 
 def combineImages(imagePaths, plot_file_path):
     try:
