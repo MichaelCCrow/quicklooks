@@ -686,8 +686,45 @@ def insert_qls_info(q, conn, table):
 fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
 fig_size_dirs = ['/.icons', '']
 
+def getEndDates(data_file_paths):
+    end_dates = {}
+    for path in data_file_paths:
+        modified_time = os.path.getmtime(path)
+        end_date = datetime.fromtimestamp(modified_time).strftime('%Y-%m-%d %H:%M:%S')
+        # print(f'[last_modified]::[{path}]', end_date)
+        end_dates[os.path.basename(path)] = end_date
+    return end_dates
+
+
+def filter_bad_matches(ds, pm):
+    if pm in act.io.armfiles.read_netcdf(ds).data_vars.keys():
+        return (ds, pm)
+    else: log.debug(f'[pm not in cdf] {pm} {ds}')
+
+
+def combine(image_paths):
+    if len(image_paths) <= 0:
+        log.warning('[combine][len<=0]')
+        return
+    plot_file_path = re.sub('([a-z_]+)(?=\.png)', '', image_paths[0]).replace('..', '.')
+    log.info(f'[combine][total][{len(image_paths)}] -> {plot_file_path}')
+    # plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
+    try:
+        combineImages(image_paths, plot_file_path)
+        if not (os.path.exists(plot_file_path)):
+            errmsg = f'[FAILED][COMBINE] Did not create file in [{plot_file_path}]'
+            log.error(errmsg)
+            with open('logs/err/combine.err', 'a+') as f:
+                print(errmsg, file=f)
+            combineImages(image_paths, plot_file_path)
+    except Exception as e:
+        plt.close()
+        log.critical(f'FAILED TO WRITE IMG: {str(e)}')
+
+
 def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
     idx_started = datetime.now()
+    log.debug(f'[{data_file_path.split("/")[5]}] [{pm}]')
 
     try:
         check_started = datetime.now()
@@ -763,56 +800,38 @@ def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
     plt.close()
 
     idx_time = datetime.now() - idx_started
-    log.trace(f'[time][process-pm] {idx_time}')
+    log.trace(f'[time][process-pm][{pm}] {idx_time}')
     log.complete()
 
     return imgpath
 
-def combine(image_paths):
-    if len(image_paths) <= 0:
-        log.warning('[combine][len<=0]')
-        return
-    plot_file_path = re.sub('([a-z_]+)(?=\.png)', '', image_paths[0]).replace('..', '.')
-    log.info(f'[combine][total][{len(image_paths)}] -> {plot_file_path}')
-    # plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
-    try:
-        combineImages(image_paths, plot_file_path)
-        if not (os.path.exists(plot_file_path)):
-            errmsg = f'[FAILED][COMBINE] Did not create file in [{plot_file_path}]'
-            log.error(errmsg)
-            with open('logs/err/combine.err', 'a+') as f:
-                print(errmsg, file=f)
-            combineImages(image_paths, plot_file_path)
-    except Exception as e:
-        plt.close()
-        log.critical(f'FAILED TO WRITE IMG: {str(e)}')
 
 def getPrimaryForDs(args, dsname):
     log.info('\n**************************************')
     log.info(f'[PROCESSING][datastream] [{dsname}]')
-    args.dsname = dsname # required for other methods to find the dsname
-    ds_dir = args.data_file_paths[args.ds_names.index(dsname)]
-    out_dir = args.base_out_dir + os.path.basename(ds_dir)
+
     pm_list = args.pm_list[dsname]
+    ds_dir = args.data_file_paths[args.ds_names.index(dsname)]
+    log.info(f'[input-directory] [{ds_dir}]')
+
     if len(pm_list) <= 0:
         log.warning(f'No measurements found for datastream [{dsname}]')
         return
-    site_name = dsname[0:3]
-    log.info(f'[input-directory] [{ds_dir}]')
 
-
-    # The list of cdf files to process
+    # Unfiltered list of cdf files in the datastream directory
     path_strs = getPathStrs(ds_dir)
-    log.info(f'[total data files] {len(path_strs)}')
-
     if len(path_strs) == 0:
         log.info(f'No new files for datastream [{dsname}]')
         return
 
+    out_dir = args.base_out_dir + os.path.basename(ds_dir)
+    args.dsname = dsname # required for other methods to find the dsname
+    site_name = dsname[0:3]
+
     current_idxs = getSortedFileIndices(args.start_date, args.num_days, path_strs)
     log.debug(f'[current_idxs] {current_idxs}')
     num_to_process = len(current_idxs)
-    log.info(f'[files-to-process] [{num_to_process}]')
+    log.info(f'[files-to-process] [{num_to_process} out of {len(path_strs)}]')
     log.info(f'[measurements] [{len(pm_list)}] {pm_list}')
     log.info(f'[pngs-to-generate] [{num_to_process * len(pm_list) * 2}]')
     log.info(f'[current-output-directory] [{out_dir}]\n')
@@ -826,7 +845,12 @@ def getPrimaryForDs(args, dsname):
     #   with counter.get_lock():
     #     counter.value += 1
     with multiprocessing.Pool(int(args.num_t)) as pool:
+        img_started = datetime.now()
         image_paths = pool.starmap(partial_processPm, product(data_file_paths, pm_list))
+
+        elapsed = datetime.now() - img_started
+        log.info(f'[time][process-imgs] {elapsed}')
+
         image_paths = [ i for i in image_paths if i ]
         if len(image_paths) > 0:
             image_paths.sort()
@@ -891,14 +915,6 @@ def buildPrimaryMeasurementDict(ds_names):
         # print('[CLOSED]')
     return ds_dict
 
-def getEndDates(data_file_paths):
-    end_dates = {}
-    for path in data_file_paths:
-        modified_time = os.path.getmtime(path)
-        end_date = datetime.fromtimestamp(modified_time).strftime('%Y-%m-%d %H:%M:%S')
-        # print(f'[last_modified]::[{path}]', end_date)
-        end_dates[os.path.basename(path)] = end_date
-    return end_dates
 
 def getArgs():
     parser = argparse.ArgumentParser(description='Create GeoDisplay Plot')
