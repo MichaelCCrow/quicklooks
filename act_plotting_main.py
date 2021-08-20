@@ -692,6 +692,17 @@ def combine(image_paths):
         log.critical(f'FAILED TO WRITE IMG: {str(e)}')
 
 
+def update_ql_tables(urlStr, dsname, pm, end_dates):
+    log.trace(f'[URL STRING] {urlStr}')
+    pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, pm, urlStr, endDate=end_dates[dsname])
+    giri_inventory_insert_query = createGiriInsert(dsname, pm, endDate=end_dates[dsname])
+    conn = getDBConnection()
+    with conn:
+        insert_qls_info(pre_selected_qls_info_insert_query, conn, 'pre_selected_qls_info')
+        insert_qls_info(giri_inventory_insert_query, conn, 'giri_inventory')
+    conn.close()
+
+
 def processPm(args, dsname, data_file_path, pm):
     idx_started = datetime.now()
     log.debug(f'[{data_file_path.split("/")[5]}] [{pm}]')
@@ -728,18 +739,10 @@ def processPm(args, dsname, data_file_path, pm):
         args.out_path = getOutputFilePath(site_name, dsname, args.base_out_dir, fig_size_dir,
                                           pm, data_file_path)
 
-        # TODO: When generating new plots, this will not put the URLs in the database since they don't exist. #FIXME
+        # TODO: When generating NEW plots, this will not put the URLs in the database since they don't exist. #FIXME
         if os.path.exists(args.out_path):
-            urlStr = getOutputUrl(site_name, dsname, args.base_out_dir, fig_size_dir, pm, data_file_path)
-            log.trace(f'[URL STRING] {urlStr}')
-
-            pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, pm, urlStr, endDate=args.end_dates[dsname])
-            giri_inventory_insert_query = createGiriInsert(dsname, pm, endDate=args.end_dates[dsname])
-            conn = getDBConnection()
-            with conn:
-                insert_qls_info(pre_selected_qls_info_insert_query, conn, 'pre_selected_qls_info')
-                insert_qls_info(giri_inventory_insert_query, conn, 'giri_inventory')
-            conn.close()
+            urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
+            update_ql_tables(urlStr, dsname, pm, args.end_dates)
             continue
 
         if idx == 1:
@@ -750,7 +753,7 @@ def processPm(args, dsname, data_file_path, pm):
             args.show_axis = 'off'
         action_started = datetime.now()
         try:
-            args.action(args)  # now executes any methods flagged from command line args
+            args.action(args) # now executes any methods flagged from command line args
             if idx == 1:
                 imgpath = args.out_path
             log.info(f'[plot-generated] {args.out_path}')
@@ -805,6 +808,7 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
     log.info(f'[pngs-to-generate] [{num_to_process * len(pm_list) * 2}]')
     log.info(f'[current-output-directory] [{out_dir}]\n')
 
+    # TODO: Save these paths to a file or database table to be indexed into Elastic Search
     data_file_paths = np.array(path_strs)[current_idxs]
     # data_file_paths = [file_path for file_path in data_file_paths for r in result_list if
     #                    r in act.io.armfiles.read_netcdf(file_path).data_vars.keys()]
