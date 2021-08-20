@@ -1148,37 +1148,36 @@ def main(args):
     sites = args.site_list.split(',')
     log.info('[sites]', sites)
 
-    if args.use_txt_file:
-        log.info('-- reading datastreams from site txt --')
-        for site in sites:
-            args.ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
-            # print(f'[args.ds_names] {args.ds_names}')
-            if args.ds_names is None: continue
 
-            args.data_file_paths = [os.path.join('/data/archive/', site, ds.strip()) for ds in args.ds_names]
-            args.data_file_paths = list(filter(lambda p: offsetDays(p, args.num_days), args.data_file_paths))
-            # reduce ds_names to only those within data_file_paths
-            args.ds_names = [ ds for ds in args.ds_names if any(ds in path for path in args.data_file_paths) ]
-            if len(args.ds_names) == 0:
-                log.info(f'No recent datastream files in the day range [{args.num_days}] for site [{site}]')
-                continue
-            log.info(f'[datastreams within {args.num_days} day(s)] {args.ds_names}')
-            log.info(f'[total] {len(args.ds_names)}')
-
-            args.start_date = 'current'
-            args.end_dates = getEndDates(args.data_file_paths)
-            args.pm_list = buildPrimaryMeasurementDict(args.ds_names)
-
-            for ds in args.ds_names:
-                getPrimaryForDs(args, ds)
-
-    # TODO: Move this to `if not args.use_txt_file`
-    else:
-        print('[WARNING] This will attempt to get all datastreams for a given site. This is not recommended and not guaranteed to work. '
-              'Please use the --use-txt-file flag and provide a file in the same directory containing a list of datastreams to process, '
-              'named like sgp.txt or anx.txt. If you wish to try this anyway, uncomment the proceeding lines in main().')
+    if not args.use_txt_file:
+        print(
+            '[WARNING] This will attempt to get all datastreams for a given site. This is not recommended and not guaranteed to work. '
+            'Please use the --use-txt-file flag and provide a file in the same directory containing a list of datastreams to process, '
+            'named like sgp.txt or anx.txt. If you wish to try this anyway, uncomment the proceeding lines in main().')
         sys.exit(1)
 
+    log.info('-- reading datastreams from site txt --')
+    for site in sites:
+        args.ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
+        # print(f'[args.ds_names] {args.ds_names}')
+        if args.ds_names is None: continue
+
+        args.data_file_paths = [os.path.join('/data/archive/', site, ds.strip()) for ds in args.ds_names]
+        args.data_file_paths = list(filter(lambda p: offsetDays(p, args.num_days), args.data_file_paths))
+        # reduce ds_names to only those within data_file_paths
+        args.ds_names = [ ds for ds in args.ds_names if any(ds in path for path in args.data_file_paths) ]
+        if len(args.ds_names) == 0:
+            log.info(f'No recent datastream files in the day range [{args.num_days}] for site [{site}]')
+            continue
+        log.info(f'[datastreams within {args.num_days} day(s)] {args.ds_names}')
+        log.info(f'[total] {len(args.ds_names)}')
+
+        args.start_date = 'current'
+        args.end_dates = getEndDates(args.data_file_paths)
+        args.pm_list = buildPrimaryMeasurementDict(args.ds_names)
+
+        for ds in args.ds_names:
+            getPrimaryForDs(args, ds)
     print('This should be one of the last thing printed.')
 
 if __name__ == '__main__':
