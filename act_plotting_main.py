@@ -19,9 +19,9 @@ import sys
 from PIL import Image
 import multiprocessing
 from itertools import product, groupby
+from loguru import logger as log
 import time
 import re
-
 from functools import partial
 import copy
 
@@ -32,19 +32,9 @@ from pathlib import Path
 import psycopg2
 from settings import DB_SETTINGS
 
-# class gargs(object): pass
-
-# class plot(object):
-#     def __init(self):
-#         self.file_path = None
-#         self.plot = None
-#         self.dsname = None
-#         self.figsize = None
-#         self.field = None
-#         self.title = None
-#         self.add_nan = None
-#         self.show_axis = None
-#         self.out_path = None
+log.remove()
+log.add('logs/act.log', level='INFO', enqueue=True, colorize=True,
+        format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >5}</lvl> | <lvl>{message}</lvl>')
 
 def getDBConnection():
     dbname = "dbname='" + DB_SETTINGS['dbname'] + "' "
@@ -61,7 +51,7 @@ def getDBConnection():
         dbConnection = psycopg2.connect(dbString)
         # print('[OPENED]')
     except (Exception, psycopg2.DatabaseError) as error:
-        print('[ERROR] Database connection failed.', error)
+        log.error(f'[ERROR] Database connection failed. {error}')
         return None
     finally:
         if dbConnection is not None:
@@ -76,15 +66,6 @@ def getDateStr(dateObj):
 
 def getStartDate(dates, selectedDate):
     return min(dates, key=lambda currDate: abs(currDate - selectedDate))
-
-def getPrimaryMeasurements(statement, dbCursor):
-    dbCursor.execute(statement)
-
-    resultList = []
-    for result in dbCursor:
-        resultList.append(list(result)[0])
-        print(list(result)[0])
-    return resultList
 
 def offsetDays(file, days=1):
     file = Path(file)
@@ -108,7 +89,7 @@ def getSortedFileIndices(startDate, dateOffset, pathStrs):
     try:
         dates = list(map(get_file_date, pathStrs))
     except Exception as e:
-        print(f'badDate -- {e}')
+        log.error(f'badDate -- {e}')
         return dates
     npDates = np.array(dates)
     npDatesSortedIdxs = np.argsort(npDates)
@@ -144,7 +125,7 @@ def getOutputFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, 
     dateDir = splitDFname[0] + '.' + splitDFname[1] + '.' + yearMonth
 
     finalOutputDir = baseOutDir + str(dFStr.year) + '/' + siteName + '/' + dataStreamName + '/' + dateDir
-    print(finalOutputDir)
+    # print(finalOutputDir)
     if not os.path.exists(finalOutputDir):
         try:
             os.makedirs(finalOutputDir)
@@ -198,7 +179,7 @@ def getPlotFilePath(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, da
     dateDir = splitDFname[0] + '.' + splitDFname[1] + '.' + yearMonth
 
     finalOutputDir = baseOutDir + str(dFStr.year) + '/' + siteName + '/' + dataStreamName + '/' + dateDir
-    print('[finalOutputDir] ', finalOutputDir)
+    log.info('[finalOutputDir] ', finalOutputDir)
     if not os.path.exists(finalOutputDir):
         os.makedirs(finalOutputDir)
     if not os.path.exists(finalOutputDir + '/.icons'):
@@ -246,8 +227,8 @@ def combineImages(imagePaths, plot_file_path):
         '''
         new_im.save(plot_file_path)
     except Exception as e:
-        print('=-========= FAILED TO COMBINE IMAGES ======================')
-        print(e)
+        log.error('=-========= FAILED TO COMBINE IMAGES ======================')
+        log.error(e)
         plt.close()
 
 def insert_row(datastream, var_name, thumbnail_url, plot_url, base_out_dir, db_connection):
@@ -430,7 +411,7 @@ def getinstcode(dsname):
 def getyrange(dsname, varname):
     inst = getinstcode(dsname)
     if not inst:
-        print(f'[ERROR] Could not parse instrument code from datastream name [{dsname}]')
+        log.error(f'[ERROR] Could not parse instrument code from datastream name [{dsname}]')
         return None
     # noinspection SqlNoDataSourceInspection
     q = f'''
@@ -453,11 +434,8 @@ def getyrange(dsname, varname):
         # print('[CLOSED]')
 
 def timeseries(args):
-    # print(f'[timeseries][args] {args}')
-
     ds = act.io.armfiles.read_netcdf(args.file_path)
     if args.plot:
-        # print('[timeseries][plot]')
         display = act.plotting.TimeSeriesDisplay({args.dsname: ds}, figsize=args.figsize)
         # print(f'TITLE: {args.title}')
         yrange = getyrange(args.dsname, args.field)
@@ -632,7 +610,7 @@ def getOutputUrl(siteName, dataStreamName, baseOutDir, outDir, figSizeDir, pmRes
     return outPath
 
 def createGiriInsert(datastreamName, varName, startDate='1990-01-01 00:00:00', endDate='9999-09-09 00:00:00'):
-    print(f'[insert] [giri_inventory] {datastreamName} : {varName} :: {startDate} - {endDate}')
+    log.trace(f'[insert][giri_inventory] {datastreamName} : {varName} :: {startDate} - {endDate}')
     # noinspection SqlNoDataSourceInspection
     q = f'''
     INSERT INTO color.giri_inventory 
@@ -655,7 +633,7 @@ def createGiriInsert(datastreamName, varName, startDate='1990-01-01 00:00:00', e
 
 
 def createPreSelectInsert(datastreamName, varName, urlStr, startDate='1990-01-01 00:00:00', endDate='9999-09-09 00:00:00'):
-    print(f'[insert] [pre_selected_qls_info] {datastreamName} : {varName} :: {startDate} - {endDate}')
+    log.trace(f'[insert][pre_selected_qls_info] {datastreamName} : {varName} :: {startDate} - {endDate}')
     # noinspection SqlNoDataSourceInspection
     q = f'''
     INSERT INTO arm_int2.pre_selected_qls_info 
@@ -684,46 +662,121 @@ def insert_qls_info(q, conn, table):
     try:
         with conn.cursor() as curs:
             curs.execute(q)
-            print(f'[{table}] INSERT success')
+            log.trace(f'[{table}] INSERT success')
     except Exception as e:
-        print(f'[FAILED INSERT][{table}]', q)
-        print('[reason]', e)
+        log.error(f'[FAILED INSERT][{table}] {q} - [REASON] {e}')
         pass
 
 fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
 fig_size_dirs = ['/.icons', '']
 
-def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
-# def processPm(args, site_name, dsname, out_dir, path_in_str, pm):
-# def processPm(args, path_in_str, pm):
-    image_paths = []
-    imgpath = ''
-    args.file_path = data_file_path
-    fsize = os.path.getsize(data_file_path)
-    if fsize > args.max_file_size: # exclude if file size is > 100MB
-        print(f'File too large: {data_file_path} :', fsize)
-        return
-    for idx in range(0, 2):
-        if idx == 1:
-            print('---[Full Images]---')
-        else:
-            print('---[Thumbnails]---')
+def getEndDates(data_file_paths):
+    end_dates = {}
+    for path in data_file_paths:
+        modified_time = os.path.getmtime(path)
+        end_date = datetime.fromtimestamp(modified_time).strftime('%Y-%m-%d %H:%M:%S')
+        # print(f'[last_modified]::[{path}]', end_date)
+        end_dates[os.path.basename(path)] = end_date
+    return end_dates
 
-        result = pm
-        # for result in result_list:
-        args.field = result  # required for timeseries plotting method
+
+def filter_bad_matches(ds, pm):
+    if pm in act.io.armfiles.read_netcdf(ds).data_vars.keys():
+        return (ds, pm)
+    else: log.debug(f'[pm not in cdf] {pm} {ds}')
+
+def readDatastreamsFromSiteTxt(site):
+    site_datastreams_file = site+'.txt'
+    if os.path.isfile(site_datastreams_file):
+        with open(site_datastreams_file, 'r') as site_datastreams:
+            return site_datastreams.readlines()
+    else:
+        err = f'!![ERROR]!! Failed to read site txt file: {site_datastreams_file}'
+        log.error(err)
+        sys.stderr.write(err)
+
+def buildPrimaryMeasurementDict(ds_names):
+    ds_dict = {}
+    for ds in ds_names:
+        ds_dict[ds] = []
+
+    SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
+    log.trace(f'[SELECT_PRIMARY_MEASUREMENTS] {SELECT_PRIMARY_MEASUREMENTS} {(tuple(ds_names),)}')
+
+    conn = getDBConnection()
+    try:
+        with conn.cursor() as curs:
+            curs.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
+            results = curs.fetchall()
+        for pm in results:
+            ds_dict[pm[0]].append(pm[1])
+            # log.info(f'pm: {pm}')
+    finally:
+        conn.close()
+        # print('[CLOSED]')
+    return ds_dict
+
+
+def combine(image_paths):
+    if len(image_paths) <= 0:
+        log.warning('[combine][len<=0]')
+        return
+    plot_file_path = re.sub('([a-z_]+)(?=\.png)', '', image_paths[0]).replace('..', '.')
+    log.info(f'[combine][total][{len(image_paths)}] -> {plot_file_path}')
+    # plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
+    try:
+        combineImages(image_paths, plot_file_path)
+        if not (os.path.exists(plot_file_path)):
+            errmsg = f'[FAILED][COMBINE] Did not create file in [{plot_file_path}]'
+            log.error(errmsg)
+            with open('logs/err/combine.err', 'a+') as f:
+                print(errmsg, file=f)
+            combineImages(image_paths, plot_file_path)
+    except Exception as e:
+        plt.close()
+        log.critical(f'FAILED TO WRITE IMG: {str(e)}')
+
+
+def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
+    idx_started = datetime.now()
+    log.debug(f'[{data_file_path.split("/")[5]}] [{pm}]')
+
+    args.file_path = data_file_path # required for timeseries function
+    fsize = os.path.getsize(data_file_path)
+    if fsize > args.max_file_size:  # exclude if file size is > 100MB
+        log.warning(f'File too large: {data_file_path} : [{fsize}]')
+        return
+
+    try:
+        check_started = datetime.now()
+        dscdf = act.io.armfiles.read_netcdf(data_file_path)
+        if pm not in dscdf.data_vars.keys():
+            log.debug(f'[SKIPPING][measurement-not-in-cdf] [{pm}] [{os.path.basename(data_file_path)}]')
+            dscdf.close()
+            return
+    except Exception as e:
+        log.critical(f'[FAILED][checking for measurements in cdf file] {data_file_path} [REASON] {e}')
+    finally:
+        dscdf.close()
+        check_ended = datetime.now() - check_started
+        log.trace(f'[time][check-if-measurement-in-cdf-file] [{check_ended}]')
+
+
+    imgpath = ''
+
+    # TODO: Figure out how to remove the necessity for a loop
+    for idx in range(2):
+        args.field = pm  # required for timeseries plotting method
         fig_size_dir = fig_size_dirs[idx]
         args.out_path = getOutputFilePath(site_name, dsname, args.base_out_dir, out_dir, fig_size_dir,
-                                          result, data_file_path)
+                                          pm, data_file_path)
         args.figsize = fig_sizes[idx]
-        print(f'[out_path] {args.out_path}')
 
         if os.path.exists(args.out_path):
-            urlStr = getOutputUrl(site_name, dsname, args.base_out_dir, out_dir, fig_size_dir, result, data_file_path)
-            print(f'URL STRING: {urlStr}')
-            pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, result, urlStr,
-                                                                       endDate=args.end_dates[dsname])
-            giri_inventory_insert_query = createGiriInsert(dsname, result, endDate=args.end_dates[dsname])
+            urlStr = getOutputUrl(site_name, dsname, args.base_out_dir, out_dir, fig_size_dir, pm, data_file_path)
+            log.trace(f'[URL STRING] {urlStr}')
+            pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, pm, urlStr, endDate=args.end_dates[dsname])
+            giri_inventory_insert_query = createGiriInsert(dsname, pm, endDate=args.end_dates[dsname])
             conn = getDBConnection()
             try:
                 with conn:
@@ -735,7 +788,7 @@ def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
             continue
         try:
             if idx == 1:
-                args.title = getSegmentName(data_file_path) + " " + result
+                args.title = getSegmentName(data_file_path) + " " + pm
                 args.show_axis = 'on'
             else:
                 args.title = ""
@@ -745,264 +798,83 @@ def processPm(args, site_name, out_dir, dsname, data_file_path, pm):
                 args.action(args)  # now executes any methods flagged from command line args
                 if idx == 1:
                     imgpath = args.out_path
+                log.info(f'[plot-generated] {args.out_path}')
             except Exception as e:
-                print(f'[[[FAILED args.action]]] {data_file_path}')
-                print(f'[ERROR][REASON][{e}]')
+                errmsg = f'[FAILED][args.action] [{data_file_path}] [{pm}] -- [REASON] [{e}]'
+                log.error(errmsg)
+                with open('logs/bad_datastreams.txt', 'a+') as f:
+                    print(errmsg, file=f)
             finally:
                 action_time = datetime.now() - action_started
-                print(f'[time][ACTION] {action_time}')
-                with open('out/times.txt', 'a+') as f:
-                    print(f'[action][{action_time}][{data_file_path.split("/")[-1]}][{result}][{"thumb" if idx == 0 else ""}]', file=f)
+                log.trace(f'[time][ACTION] {action_time}')
         except Exception as e:
-            print(f'FAILED PROCESS: {str(e)}')
-            print(f'Failed to process: {data_file_path}')
+            log.error(f'[FAILED to PROCESS] {data_file_path} [REASON] {str(e)}')
             if os.access('/tmp/bad_datastreams.txt', os.W_OK):
                 with open('/tmp/bad_datastreams.txt', 'a+') as file_out:
-                    file_out.write(args.out_path + '\n')
+                    print(args.out_path, file=file_out)
             plt.close()
             return
     plt.close()
+
+    idx_time = datetime.now() - idx_started
+    log.trace(f'[time][process-pm][{pm}] {idx_time}')
+    log.complete()
+
     return imgpath
 
-def combine(image_paths):
-    if len(image_paths) <= 0:
-        print('[combine][len<=0]')
-        return
-    plot_file_path = re.sub('([a-z_]+)(?=\.png)', '', image_paths[0]).replace('..', '.')
-    print(f'[combine][total][{len(image_paths)}] -> [{plot_file_path}]')
-    # plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
-    try:
-        combineImages(image_paths, plot_file_path)
-        if not (os.path.exists(plot_file_path)):
-            errmsg = f'[FAILED] Did not create file in [{plot_file_path}]'
-            print(errmsg)
-            with open('logs/err/combine.err', 'a+') as f:
-                print(errmsg, file=f)
-            combineImages(image_paths, plot_file_path)
-    except Exception as e:
-        plt.close()
-        print(f'FAILED TO WRITE IMG: {str(e)}')
 
-# def getPrimaryForDs(args, dsname, result_list): # used with multiprocessing.Process approach
 def getPrimaryForDs(args, dsname):
-    print(f'[{dsname}]')
+    log.info('\n**************************************')
+    log.info(f'[PROCESSING][datastream] [{dsname}]')
+
+    pm_list = args.pm_list[dsname]
+    ds_dir = args.data_file_paths[args.ds_names.index(dsname)]
+    log.info(f'[input-directory] [{ds_dir}]')
+
+    if len(pm_list) <= 0:
+        log.warning(f'No measurements found for datastream [{dsname}]')
+        return
+
+    # Unfiltered list of cdf files in the datastream directory
+    path_strs = getPathStrs(ds_dir)
+    if len(path_strs) == 0:
+        log.info(f'No new files for datastream [{dsname}]')
+        return
+
+    out_dir = args.base_out_dir + os.path.basename(ds_dir)
     args.dsname = dsname # required for other methods to find the dsname
-    args.ds_dir = args.data_file_paths[args.ds_names.index(dsname)]
-    out_dir = args.base_out_dir + os.path.basename(args.ds_dir)
-    result_list = args.pm_list[dsname]
     site_name = dsname[0:3]
 
-    print('*****************************************************************************')
-    print('Current input directory: ' + args.ds_dir)
-    print('*****************************************************************************\n')
-    print('Creating plots for the following variables...\n')
-
-    # The list of cdf files to process
-    path_strs = getPathStrs(args.ds_dir)
-    print(f'[total data files] {len(path_strs)}')
-
-    if len(path_strs) == 0:
-        print(f'No new files for datastream [{dsname}]')
-        return
-
     current_idxs = getSortedFileIndices(args.start_date, args.num_days, path_strs)
-    print(f'[current_idxs] {current_idxs}')
+    log.debug(f'[current_idxs] {current_idxs}')
     num_to_process = len(current_idxs)
-    print(f'[files-to-process] [{num_to_process}]')
-    print(f'[total-measurements] [{len(result_list)}]')
-    print(f'[pngs-to-generate] [{num_to_process * len(result_list) * 2}]')
-
-    # args.file_paths = [] # don't think this is needed
-    print(f'\nCurrent output directory: {out_dir}\n')
+    log.info(f'[files-to-process] [{num_to_process} out of {len(path_strs)}]')
+    log.info(f'[measurements] [{len(pm_list)}] {pm_list}')
+    log.info(f'[pngs-to-generate] [{num_to_process * len(pm_list) * 2}]')
+    log.info(f'[current-output-directory] [{out_dir}]\n')
 
     data_file_paths = np.array(path_strs)[current_idxs]
-
+    # data_file_paths = [file_path for file_path in data_file_paths for r in result_list if
+    #                    r in act.io.armfiles.read_netcdf(file_path).data_vars.keys()]
     partial_processPm = partial(processPm, copy.deepcopy(args), site_name, out_dir, dsname)
-    dfp = product(data_file_paths, result_list)
 
+    # TODO: Monitor the progress by counting the number of completed datastreams
     with multiprocessing.Pool(int(args.num_t)) as pool:
-        image_paths = pool.starmap(partial_processPm, dfp)
+        img_started = datetime.now()
+        image_paths = pool.starmap(partial_processPm, product(data_file_paths, pm_list))
+
+        elapsed = datetime.now() - img_started
+        log.info(f'[time][process-imgs] {elapsed}')
+
         image_paths = [ i for i in image_paths if i ]
-        image_paths.sort()
-        image_paths = [list(i) for j, i in groupby(image_paths,
-                                            lambda a: re.search('([a-zA-Z0-9]+\.[a-z0-9]{2}\.\d{8})', a).group())]
-        print('-----------------------IMAGE PATHS---------------------')
-        print(image_paths)
-        print('=======================================================')
-        if len(image_paths) > 0: # and image_paths[0] is not None:
-            pool.map(combine, image_paths)
-
-    # with multiprocessing.Pool(int(args.num_t)) as pool:
-    #     pool.map(combineImages, )
-
-    for data_file_path in range(0):
-    # for data_file_path in data_file_paths:
-        idx_started = datetime.now()
-        path_in_str = data_file_path
-        args.file_path = data_file_path # needed for plotting methods
-
-        # calcsize_started = datetime.now()
-        fsize = os.path.getsize(path_in_str)
-        if fsize > args.max_file_size: # exclude if file size is > 100MB
-            print(f'File too large: {path_in_str} :', fsize)
-            continue
-        # elapsed_time = datetime.now() - calcsize_started
-        # print('[calcsize time] {}\n\n'.format(elapsed_time))
-
-        print(f'Current input file: {path_in_str}')
-        print('Creating output files...\n')
-
-        plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
-        # print(f'[plot_file_path] {plot_file_path}')
-        # print(f'[primary_measurements] [{len(result_list)}] {result_list}')
-
-        part = partial(processPm, copy.deepcopy(args), site_name, dsname, out_dir, path_in_str)
-        with multiprocessing.Pool(int(args.num_t)) as pool:
-            image_paths = pool.map(part, result_list)
-
-        # runs for smaller size `fig_sizes[0]`, then again for larger `fig_sizes[1]`
-        # for idx in range(0, 2):
-        #     if idx == 1:
-        #         print('---[Full Images]---')
-        #     else: print('---[Thumbnails]---')
-        #
-        #     for result in result_list:
-        #         args.field = result # required for timeseries plotting method
-        #         fig_size_dir = fig_size_dirs[idx]
-        #         args.out_path = getOutputFilePath(site_name, dsname, args.base_out_dir, out_dir, fig_size_dir,
-        #                                           result, path_in_str)
-        #         if idx == 1:
-        #             image_paths.append(args.out_path)
-        #
-        #         args.figsize = fig_sizes[idx]
-        #         print(f'[out_path] {args.out_path}')
-        #
-        #         if os.path.exists(args.out_path):
-        #             urlStr = getOutputUrl(site_name, dsname, args.base_out_dir, out_dir, fig_size_dir, result, path_in_str)
-        #             print(f'URL STRING: {urlStr}')
-        #             pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, result, urlStr, endDate=args.end_dates[dsname])
-        #             giri_inventory_insert_query = createGiriInsert(dsname, result, endDate=args.end_dates[dsname])
-        #             conn = getDBConnection()
-        #             try:
-        #                 with conn:
-        #                     insert_qls_info(pre_selected_qls_info_insert_query, conn, 'pre_selected_qls_info')
-        #                     insert_qls_info(giri_inventory_insert_query, conn, 'giri_inventory')
-        #             finally:
-        #                 conn.close()
-        #                 # print('[CLOSED]')
-        #             continue
-        #         try:
-        #             if idx == 1:
-        #                 args.title = getSegmentName(path_in_str) + " " + result
-        #                 args.show_axis = 'on'
-        #             else:
-        #                 args.title = ""
-        #                 args.show_axis = 'off'
-        #             try:
-        #                 # action_started = datetime.now()
-        #                 args.action(args) # now executes any methods flagged from command line args
-        #                 # action_time = datetime.now() - action_started
-        #                 # print(f'[time][ACTION] {action_time}')
-        #             except:
-        #                 print(f'[[[FAILED args.action]]] {path_in_str}')
-        #         except Exception as e:
-        #             print(f'FAILED PROCESS: {str(e)}')
-        #             print(f'Failed to process: {path_in_str}')
-        #             if os.access('/tmp/bad_datastreams.txt', os.W_OK):
-        #                 with open('/tmp/bad_datastreams.txt', 'a+') as file_out:
-        #                     file_out.write(args.out_path + '\n')
-        #             plt.close()
-        #             return
-        #     plt.close()
-
         if len(image_paths) > 0:
-            # print('---------------IMAGE PATHS-------------------------')
-            # print(image_paths)
-            # print('===============IMAGE PATHS=========================')
-            try:
-                # combine_started = datetime.now()
-                combineImages(image_paths, plot_file_path)
-                plot_file_path2 = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
-                if plot_file_path2 != plot_file_path:
-                    print('[WARNING] Plot file paths are different. BEHOLD:')
-                    print(f'[plot_file_path] {plot_file_path}\n[plot_file_path2] {plot_file_path2}')
-                if not (os.path.exists(plot_file_path)):
-                    print(f'[FAILED] Did not create file in [{plot_file_path}]')
-                    combineImages(image_paths, plot_file_path)
-                # elapsed_time = datetime.now() - combine_started
-                # print(f'[time][CombineImages] {elapsed_time}\n\n')
+            image_paths.sort()
+            image_paths = [ list(i) for j, i in groupby(image_paths,
+                                                        lambda a: re.search('([a-zA-Z0-9]+\.[a-z0-9]{2}\.\d{8})', a).group())]
+            pool.map(combine, image_paths)
+        else:
+            log.warning(f'[No plots generated for datastream] [{dsname}]')
 
-            except Exception as e:
-                plt.close()
-                print(f'FAILED TO WRITE IMG: {str(e)}')
-        idx_time = datetime.now() - idx_started
-        print(f'[time][idx] {idx_time}')
-        print('\n...done\n')
-    print('*****************************************************************************\n\n\n')
-
-def readDatastreamsFromSiteTxt(site):
-    site_datastreams_file = site+'.txt'
-    if os.path.isfile(site_datastreams_file):
-        with open(site_datastreams_file, 'r') as site_datastreams:
-            return site_datastreams.readlines()
-    else:
-        err = f'!![ERROR]!! Failed to read site txt file: {site_datastreams_file}'
-        print(err)
-        sys.stderr.write(err)
-
-def oldwayGetDsNames(sites):
-    def getSelectedSitePaths(sites):
-        data_archive_path = '/data/archive/'
-        data_archive_dirs = [os.path.join(data_archive_path, o) for o in os.listdir(data_archive_path) if
-                             os.path.isdir(os.path.join(data_archive_path, o))]
-        data_archive_dirs = list(filter(remove_raw_DS, data_archive_dirs))
-        return [site for site in data_archive_dirs if os.path.basename(site) in sites]
-
-    selected_sites = getSelectedSitePaths(sites)
-    for site_path in selected_sites:
-        print(str(os.path.basename(site_path)))
-        site_path_dirs = [os.path.join(site_path, o) for o in os.listdir(site_path) if
-                          os.path.isdir(os.path.join(site_path, o))]
-
-        data_file_paths = list(map(str, site_path_dirs)) # /data/archive/site_code/datastream.lvl
-        data_file_paths = list(filter(remove_raw_DS, data_file_paths))
-
-        ds_names = list(map(get_data_stream_name, data_file_paths))
-        ds_names = list(filter(remove_raw_DS, ds_names))
-        # if args.use_txt_file and datastream_txt_files:
-        #     ds_names = list(filter(lambda ds : ds in datastream_txt_files[ds[:3]], ds_names))
-        print(ds_names)
-        return ds_names, data_file_paths
-
-def buildPrimaryMeasurementDict(ds_names):
-    ds_dict = {}
-    for ds in ds_names:
-        ds_dict[ds] = []
-
-    SELECT_PRIMARY_MEASUREMENTS = "select d.datastream, d.var_name from arm_int2.datastream_var_name_info d where d.datastream IN %s"
-    # print(f'[SELECT_PRIMARY_MEASUREMENTS] {SELECT_PRIMARY_MEASUREMENTS} {(tuple(ds_names),)}')
-    conn = getDBConnection()
-    try:
-        with conn.cursor() as curs:
-            curs.execute(SELECT_PRIMARY_MEASUREMENTS, (tuple(ds_names),))
-            results = curs.fetchall()
-        for pm in results:
-            ds_dict[pm[0]].append(pm[1])
-            print('pm: ', pm)
-    finally:
-        conn.close()
-        # print('[CLOSED]')
-    print(f'[ds_dict] {ds_dict}')
-    return ds_dict
-
-def getEndDates(data_file_paths):
-    end_dates = {}
-    for path in data_file_paths:
-        modified_time = os.path.getmtime(path)
-        end_date = datetime.fromtimestamp(modified_time).strftime('%Y-%m-%d %H:%M:%S')
-        # print(f'[last_modified]::[{path}]', end_date)
-        end_dates[os.path.basename(path)] = end_date
-    return end_dates
 
 def getArgs():
     parser = argparse.ArgumentParser(description='Create GeoDisplay Plot')
@@ -1233,88 +1105,45 @@ def getArgs():
 
 
 def main(args):
-    # global gargs
-    # gargs = gargs()
-    # gargs = args.base_out_dir
-
     sites = args.site_list.split(',')
-    print('[sites]', sites)
+    log.info('[sites]', sites)
 
-    if args.use_txt_file:
-        print('-- reading datastreams from site txt --')
-        for site in sites:
-            args.ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
-            # print(f'[args.ds_names] {args.ds_names}')
-            if args.ds_names is None: continue
-
-            args.data_file_paths = [os.path.join('/data/archive/', site, ds.strip()) for ds in args.ds_names]
-            args.data_file_paths = list(filter(lambda p: offsetDays(p, args.num_days), args.data_file_paths))
-            # reduce ds_names to only those within data_file_paths
-            args.ds_names = [ ds for ds in args.ds_names if any(ds in path for path in args.data_file_paths) ]
-            if len(args.ds_names) == 0:
-                print(f'No recent datastream files in the day range [{args.num_days}] for site [{site}]')
-                continue
-            print(f'[datastreams within {args.num_days} day(s)]', args.ds_names)
-            print(f'[total]', len(args.ds_names))
-
-            args.start_date = 'current'
-            args.end_dates = getEndDates(args.data_file_paths)
-
-            print(f'[args.ds_names] {args.ds_names}')
-
-
-            # pmdict_started = datetime.now()
-            args.pm_list = buildPrimaryMeasurementDict(args.ds_names)
-            # elapsed_time = datetime.now() - pmdict_started
-            # print(f'[time][buildPrimaryMeas] {elapsed_time}\n\n')
-
-            # partial_getPrimaryForDs = partial(getPrimaryForDs, copy.deepcopy(args))
-
-            # pool = multiprocessing.Pool(int(args.num_t))
-
-            for ds in args.ds_names:
-                getPrimaryForDs(args, ds)
-
-            ##############################################################
-            ### Works in 2m on enainterpolatedsondeC1.c1 for last 5 days #
-            ##############################################################
-            # partial_getPrimaryForDs = partial(getPrimaryForDs, copy.deepcopy(args))
-            ##############################################################
-            # procs = []
-            # for ds, pm in args.pm_list.items():
-            #     p = multiprocessing.Process(target=partial_getPrimaryForDs, args=(ds,pm))
-            #     procs.append(p)
-            #     p.start()
-            # for proc in procs:
-            #     proc.join()
-            ##############################################################
-
-            # with multiprocessing.Pool(int(args.num_t)) as pool:
-            #     pool.map(partial_getPrimaryForDs, args.ds_names)
-
-
-
-    else:
-        print('[WARNING] This will attempt to get all datastreams for a given site. This is not recommended and not guaranteed to work. '
-              'Please use the --use-txt-file flag and provide a file in the same directory containing a list of datastreams to process, '
-              'named like sgp.txt or anx.txt. If you wish to try this anyway, uncomment the proceeding lines in main().')
+    if not args.use_txt_file:
+        print(
+            '[WARNING] This will attempt to get all datastreams for a given site. This is not recommended and not guaranteed to work. '
+            'Please use the --use-txt-file flag and provide a file in the same directory containing a list of datastreams to process, '
+            'named like sgp.txt or anx.txt. If you wish to try this anyway, uncomment the proceeding lines in main().')
         sys.exit(1)
-        # oldway = oldwayGetDsNames(sites)
-        # args.end_dates = {}
-        # args.ds_names = oldway[0]
-        # args.data_file_paths = oldway[1]
-        # proceed(args)
 
+    log.info('-- reading datastreams from site txt --')
+    for site in sites:
+        args.ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
+        # print(f'[args.ds_names] {args.ds_names}')
+        if args.ds_names is None: continue
+
+        args.data_file_paths = [os.path.join('/data/archive/', site, ds.strip()) for ds in args.ds_names]
+        args.data_file_paths = list(filter(lambda p: offsetDays(p, args.num_days), args.data_file_paths))
+        # reduce ds_names to only those within data_file_paths
+        args.ds_names = [ ds for ds in args.ds_names if any(ds in path for path in args.data_file_paths) ]
+        if len(args.ds_names) == 0:
+            log.info(f'No recent datastream files in the day range [{args.num_days}] for site [{site}]')
+            continue
+        log.info(f'[datastreams within {args.num_days} day(s)] {args.ds_names}')
+        log.info(f'[total] {len(args.ds_names)}')
+
+        args.start_date = 'current'
+        args.end_dates = getEndDates(args.data_file_paths)
+        args.pm_list = buildPrimaryMeasurementDict(args.ds_names)
+
+        for ds in args.ds_names:
+            getPrimaryForDs(args, ds)
     print('This should be one of the last thing printed.')
 
 if __name__ == '__main__':
-    # global gargs
     started = datetime.now()
-    print('[BEGIN]', started,'\n--------------------------------------------\n')
+    log.info('[BEGIN]', started,'\n--------------------------------------------\n')
     args = getArgs()
-    # gargs = args
-
     main(args)
-    print('Done with all!\n')
+    log.info('Done with all!\n')
     elapsed_time = datetime.now() - started
-    print(f'[Processing time] {elapsed_time}\n\n')
+    log.info(f'[Processing time] {elapsed_time}\n\n')
