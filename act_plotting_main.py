@@ -32,9 +32,6 @@ from pathlib import Path
 import psycopg2
 from settings import DB_SETTINGS
 
-log.remove()
-log.add('logs/act.log', level='INFO', enqueue=True, colorize=True,
-        format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >5}</lvl> | <lvl>{message}</lvl>')
 
 def getDBConnection():
     dbname = "dbname='" + DB_SETTINGS['dbname'] + "' "
@@ -849,6 +846,10 @@ def getArgs():
                         the same directory and contain newline-separated names of datastreams.''')
     parser.add_argument('-maxFs', '--max-file-size', type=int, default=100000000, dest='max_file_size',
                         help='max file size in number of bytes - default is 100000000 (100MB)')
+    parser.add_argument('--log-file', type=str, default='logs/act.log',
+                        help='File to write output logs to. Should end with ".log". Default is "logs/act.log".')
+    parser.add_argument('--log-by-site', action='store_true', default=False,
+                        help='If given, the logs will be separated by site name, ending with ".[site].log".')
     # parser.add_argument('-q', '--quiet', action='store_false',
     #                     help='silence a lot of the logging output')
 
@@ -1072,6 +1073,14 @@ def main(args):
 
     log.info('-- reading datastreams from site txt --')
     for site in sites:
+        if args.log_by_site:
+            log.remove()
+            logfile = args.log_file.replace('.log', f'.{site}.log')
+            log.add(logfile, level='INFO', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
+                    format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >5}</lvl> | <lvl>{message}</lvl>')
+        log.info('********************************************************\n')
+        log.info(f'[Processing][site] [{site}]')
+
         ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
         # print(f'[ds_names] {ds_names}')
         if ds_names is None: continue
@@ -1112,10 +1121,17 @@ def main(args):
 
     print('This should be one of the last thing printed.')
 
+def debug_only(record):
+    return record['level'].name == 'DEBUG'
+
 if __name__ == '__main__':
     started = datetime.now()
     log.info('[BEGIN]', started,'\n--------------------------------------------\n')
     args = getArgs()
+    log.remove()
+    log.add(args.log_file, level='INFO', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
+            format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >4}</lvl> | <lvl>{message}</lvl>')
+    log.add('logs/debug.log', filter=debug_only, enqueue=True, colorize=True, rotation='100 MB')
     main(args)
     log.info('Done with all!\n')
     elapsed_time = datetime.now() - started
