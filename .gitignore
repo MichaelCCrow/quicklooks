@@ -4,6 +4,7 @@ lis/
 test/
 tmp/
 txt/
+diff/
 
 ### STS ###
 .apt_generated
