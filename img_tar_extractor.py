@@ -9,7 +9,7 @@ from PIL import Image
 from loguru import logger as log
 from settings import DB_SETTINGS
 
-log = log.opt(colors=True)
+logc = log.opt(colors=True)
 ''' Default output directory - overridden by args.output_dir '''
 ftp_root = '/var/ftp'
 ''' Default src directory '''
@@ -17,7 +17,7 @@ archive_root = '/data/archive'
 url_root = 'https://adc.arm.gov'
 total_datastreams = 0
 num_tars_in_datastream = 0
-totalcounter = 0
+totalcount = 0
 counter = None
 tarcounter = None
 completed = []
@@ -126,9 +126,9 @@ def get_img_datastreams(days=-1):
     with conn.cursor() as cur:
         cur.execute(q)
         total_datastreams = cur.rowcount
-        log.info(f'[datastreams] {total_datastreams}')
+        log.info(f'[datastreams found] {total_datastreams}')
         results = cur.fetchall() # [('datastream.b1', 'jpg'), ... ]
-        log.debug(f'[datastreams with images] {results}')
+        log.debug(f'[ALL image datastreams from database] {results}')
         cur.close()
     conn.close()
     return results
@@ -154,13 +154,47 @@ def build_thumbs(out_path, img):
     ''' Substitute /var/ftp for https link '''
     url = thumb.replace(ftp_root, url_root)
     return url
-"""
-
-'''
 def gettotal(tfile):
     with tarfile.open(tfile, 'r') as tar:
         return len(tar.getnames())
-'''
+"""
+
+def update_thumbnail(datastream, thumb):
+    log.info(f'[UPDATING THUMBNAIL] {thumb}')
+    update_pre_selected(datastream, thumb)
+    update_giri_inventory(datastream)
+    completed.append((datastream, thumb))
+
+
+def create_symlinks_for_existing_images(imgfiles, datastream, img_type):
+    log.info('[IMAGE FILES FOUND - SYMLINKING...]')
+    started_creating_symlinks = datetime.now()
+    imgfiles.sort()
+    imgfiles.reverse()
+    log.trace(f'{imgfiles[:5]}')
+    thumb = ''
+    i = 0
+    ''' Create symlinks to the images in the ftp area '''
+    for imgfile_path in imgfiles[:10]:
+        dest = join(get_output_dir(imgfile_path, datastream), basename(imgfile_path))
+        log.debug(f'[src] {imgfile_path} --> [dest] {dest}')
+        if exists(dest):
+            log.warning(f'[already exists] {dest}')
+            continue
+        os.symlink(imgfile_path, dest)
+        thumb = join(dirname(dest), '.icons', basename(dest))
+        log.debug(f'[CREATE ICON THUMB] {dest} -> {thumb}')
+        create_thumbnail(bigimg=dest, dest=thumb)
+        if i == 0:
+            i = 1
+            logc.info(f'[<g>Thumbnail should exist here</>] {thumb}')
+            if not exists(thumb):
+                log.error(f'[THUMBNAIL NOT FOUND] {thumb} - Before attempting to update the qls thumbnail, it could not be found.')
+                continue
+            thumb = thumb.replace(ftp_root, url_root)
+            log.info(f'[UPDATING {img_type} THUMBNAIL] {thumb}')
+    update_thumbnail(datastream, thumb)
+    logc.info(f'[<m>time</>][create-symlinks] {datetime.now() - started_creating_symlinks}')
 
 
 def extract_tar(tfile, out_path):
@@ -173,7 +207,7 @@ def extract_tar(tfile, out_path):
 
         ''' Keep count of how many are extracted '''
         total_images = len(img_names)
-        log.info(f'[image-count][{tfile}] <y>{total_images}</>')
+        logc.info(f'[image-count][{tfile}] <y>{total_images}</>')
         with counter.get_lock():
             counter.value += total_images
 
@@ -193,128 +227,116 @@ def extract_tar(tfile, out_path):
             urls.append(url)
     with tarcounter.get_lock():
         tarcounter.value += 1
-        log.info(f'[<c>tars-extracted</>] {tarcounter.value}/{num_tars_in_datastream} | <g>{int((tarcounter.value/num_tars_in_datastream) * 100)}%</>') # <d>[{tfile.split('/')[4]}] completed</>''')
+        logc.info(f'[<c>tars-extracted</>] {tarcounter.value}/{num_tars_in_datastream} | <g>{int((tarcounter.value/num_tars_in_datastream) * 100)}%</>') # <d>[{tfile.split('/')[4]}] completed</>''')
     return urls
+
+
+def process_tars(tarfiles, datastream):
+    global counter
+    global totalcount
+    global num_tars_in_datastream
+    num_tars_in_datastream = len(tarfiles)
+    started_processing_tar_files = datetime.now()
+    tarfiles.sort()
+    tarfiles.reverse()
+
+    ''' A tuple of the source tar file path, and the destination directory - used for parallel iteration '''
+    in_out_paths = [(tarfile_path, get_output_dir(tarfile_path, datastream)) for tarfile_path in
+                    [f for f in tarfiles]]
+    log.trace(f'[in_out_paths] {in_out_paths[:5]}')
+
+    ''' For each tar file, extract images and collect the url for the thumbnails '''
+    with Pool(args.processes) as pool:
+        log.info('[processing tar files]')
+        # totalimages = sum(pool.map(gettotal, tarfiles))
+        # log.warning(f'[TOTAL IMAGES IN TAR FILES] {totalimages}')
+        thumbs = pool.starmap(extract_tar, in_out_paths)
+        thumbs = [t for t in thumbs if t]
+        logc.info(f'[<g>THUMBS PROCESSED</>] {len(sum(thumbs, []))}')
+    logc.info(f'[<g>TARRED IMAGES EXTRACTED</>] {counter.value}')
+    with counter.get_lock():
+        totalcount += counter.value
+        counter.value = 0
+    update_thumbnail(datastream, thumbs[0][0])
+    logc.info(f'[<m>time</>][process-tarfiles] {datetime.now() - started_processing_tar_files}')
 
 
 def main(args):
     global tarcounter
-    global totalcounter
-    datastreams = get_img_datastreams(args.days)[:2]
+    datastreams = args.datastreams or get_img_datastreams(args.days)[:2]
     # datastreams = [('marcamseastateM1.a1', 'jpg')] # used to test symlinks
     log.debug(datastreams)
     prog = 0
 
-    ''' For each datastream name '''
     for datastream, img_type in datastreams:
         with tarcounter.get_lock():
             tarcounter.value = 0
         prog += 1
-        i = 0
-        log.info(f'[<c>datastreams-processed</>] [{prog}/{total_datastreams}]')
+        logc.info(f'[<c>datastreams-processed</>] [{prog}/{total_datastreams}]')
 
         datastream_dir = join(archive_root, datastream[:3], datastream) # /data/archive/{site}/{datastream}
         if not isdir(datastream_dir):
             log.warning(f'[DOES NOT EXIST] {datastream_dir}')
             continue
 
-        log.debug('[listing...]')
         files = os.listdir(datastream_dir)
         log.info(f'[{datastream_dir}] {len(files)}')
 
-        started_processing_tar_files = datetime.now()
-        log.debug('[building tar file list...]')
         tarfiles = [ join(datastream_dir, file) for file in files if file.endswith('.tar') ]
         if len(tarfiles) > 0:
-            global num_tars_in_datastream
-            num_tars_in_datastream = len(tarfiles)
-            tarfiles.sort()
-            tarfiles.reverse()
+            process_tars(tarfiles, datastream)
 
-            log.debug('[building list of src paths and output paths...]')
-            ''' A tuple of the source tar file path, and the destination directory - used for parallel iteration '''
-            in_out_paths = [ ( tarfile_path, get_output_dir(tarfile_path, datastream) ) for tarfile_path in [ f for f in tarfiles ] ]
-            log.trace(f'[in_out_paths] {in_out_paths[:5]}')
-
-            ''' For each tar file, extract images and collect the url for the thumbnails '''
-            with Pool(args.processes) as pool:
-                log.info('[processing tar files]')
-                # totalimages = sum(pool.map(gettotal, tarfiles))
-                # log.warning(f'[TOTAL IMAGES IN TAR FILES] {totalimages}')
-                thumbs = pool.starmap(extract_tar, in_out_paths)
-                thumbs = [ t for t in thumbs if t ]
-                log.info(f'[<g>THUMBS PROCESSED</>] {len(sum(thumbs, []))}')
-
-            if len(thumbs) > 0 and i == 0:
-                i = 1
-                log.info(f'[UPDATING tar THUMBNAIL] {thumbs[0][0]}')
-                update_pre_selected(datastream, thumbs[0][0])
-                update_giri_inventory(datastream)
-                completed.append((datastream, thumbs[0][0]))
-            log.info(f'[<g>TARRED IMAGES EXTRACTED</>] {counter.value}')
-            with counter.get_lock():
-                totalcounter += counter.value
-                counter.value = 0
-        log.info(f'[<m>time</>][process-tarfiles] {datetime.now() - started_processing_tar_files}')
-
-        started_creating_symlinks = datetime.now()
-        log.debug('[building list of image files...]')
         imgfiles = [ join(datastream_dir, file) for file in files if file.endswith(img_type) ]
-        if len(imgfiles) == 0: continue
-
-        log.info('[IMAGE FILES FOUND - SYMLINKING]')
-        imgfiles.sort()
-        imgfiles.reverse()
-        log.trace(f'{imgfiles[:5]}')
-
-        ''' Create symlinks to the images in the ftp area '''
-        for imgfile_path in imgfiles:
-            dest = join(get_output_dir(imgfile_path, datastream), basename(imgfile_path))
-            log.debug(f'[src] {imgfile_path} --> [dest] {dest}')
-            if exists(dest):
-                log.warning(f'[already exists] {dest}')
-                continue
-            os.symlink(imgfile_path, dest)
-            thumb = join(dirname(dest), '.icons', basename(dest))
-            log.info(f'[CREATE ICON THUMB] {dest} -> {thumb}')
-            create_thumbnail(bigimg=dest, dest=thumb)
-            if i == 0:
-                i = 1
-                thumb = thumb.replace(ftp_root, url_root)
-                log.info(f'[UPDATING {img_type} THUMBNAIL] {thumb}')
-                if not exists(dest):
-                    log.error(f'[THUMBNAIL NOT FOUND] {dest} - Before attempting to update the qls thumbnail, it could not be found.')
-                    continue
-                log.info(f'[<g>Thumbnail should exist here</>] {dest}')
-                update_pre_selected(datastream, thumb)
-                update_giri_inventory(datastream)
-                completed.append((datastream, thumb))
-        log.info(f'[<m>time</>][create-symlinks] {datetime.now() - started_creating_symlinks}')
+        if len(imgfiles) > 0:
+            create_symlinks_for_existing_images(imgfiles, datastream, img_type)
 
     log.info('[DONE]')
-    log.info(f'[<g>TOTAL TARRED IMAGES EXTRACTED</>] {totalcounter}')
-    log.info(f'[datastreams processed] {len(completed)}')
-    # log.info(f'[datastreams completed] {completed}')
-    log.info('[datastreams completed]')
+    logc.info(f'[<g>TOTAL TARRED IMAGES EXTRACTED</>] {totalcount}')
+    log.info(f'[datastreams processed] {len(completed)}\n[datastreams completed]')
     for c in completed: log.info(c)
     log.info('**==========================================**')
+
+
+def getargs():
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
+        description='''Tarred Image Extractor
+    This script extracts jpg and png images from tar files in /data/archive to the quicklooks ftp. 
+    Any images found that have already been extracted have symlinks created instead.''',
+        epilog='''Example usages:
+    Supply datastreams as values to the -D [--datastreams] argument directly:\n
+        $ %(prog)s -D sgp30ebbrE10.b1 nsatwrcam40mC1.a1\n
+    Use the -A [--all] argument to process all datastreams with image var names:\n
+        $ %(prog)s -A''')
+    parser.add_argument('-n', '--days', default=-1, type=int,
+                        help='Specify the number of days back to check for new files. The default, -1, indicates that files for all time should be processed. (default: %(default)s)')
+    parser.add_argument('-o', '--output-dir', default=ftp_root, type=str,
+                        help='The root output directory. This argument is primarily intended for testing and debugging. (default: %(default)s)')
+    parser.add_argument('-p', '--processes', default=8, type=int,
+                        help='Number of parallel processes to spin up while extracting tars. (default: %(default)s)')
+
+    dsargs = parser.add_argument_group('datastream selection required arguments').add_mutually_exclusive_group(required=True)
+    dsargs.add_argument('-D', '--datastreams', nargs='+', metavar='datastream',
+                        help='Datastreams to process. Provide each datastream separated by a space. Example: -D sgp30ebbrE10.b1 nsa30ebbrE10.b1')
+    dsargs.add_argument('-A', '--all', action='store_true',
+                        help='Flag to indicate that all datastreams found in the database with variables "jpg" and "png" are to be processed.')
+
+    logargs = parser.add_argument_group('logging options').add_mutually_exclusive_group()
+    logargs.add_argument('-i', '--info',  dest='loglevel', const='INFO',  action='store_const', help='Set logging output to INFO')
+    logargs.add_argument('-d', '--debug', dest='loglevel', const='DEBUG', action='store_const', help='Set logging output to DEBUG')
+    logargs.add_argument('-t', '--trace', dest='loglevel', const='TRACE', action='store_const', help='Set logging output to TRACE')
+    logargs.add_argument('-s', '--supertrace', dest='loglevel', const='SUPERTRACE', action='store_const',
+                         help='Set logging output to SUPERTRACE. Do not use this unless you want to see millions of file paths logged.')
+    # logargs.add_argument('-l', '--log', dest='loglevel', choices=['TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
     counter = Value('i', 0)
     tarcounter = Value('i', 0)
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-n', '--days', default=-1, type=int, help='Specify the number of days back to check for new files. Default is -1, which indicates that files for all time should be processed.')
-    parser.add_argument('-o', '--output-dir', default=ftp_root, help='The root output directory. Defaults to /var/ftp. This argument is primarily intended for testing and debugging.')
-    parser.add_argument('-p', '--processes', default=8, type=int, help='Number of parallel processes to spin up while extracting tars.')
-    logargs = parser.add_mutually_exclusive_group()
-    logargs.add_argument('-i', '--info',  dest='loglevel', const='INFO',  action='store_const', help='Set logging output to INFO')
-    logargs.add_argument('-d', '--debug', dest='loglevel', const='DEBUG', action='store_const', help='Set logging output to DEBUG')
-    logargs.add_argument('-t', '--trace', dest='loglevel', const='TRACE', action='store_const', help='Set logging output to TRACE')
-    logargs.add_argument('-s', '--supertrace', dest='loglevel', const='SUPERTRACE', action='store_const', help="Set logging output to SUPERTRACE. Don't use this unless you want to see millions of file paths logged.")
-    # logargs.add_argument('-l', '--log', dest='loglevel', choices=['TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
-    args = parser.parse_args()
+
+    args = getargs()
     ftp_root = args.output_dir
+
     log.remove()
     log.add('logs/img_extractor.log', level=args.loglevel or 'DEBUG', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
             format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >4}</lvl> | <lvl>{message}</lvl>')
