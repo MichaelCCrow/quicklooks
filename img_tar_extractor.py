@@ -154,14 +154,10 @@ def build_thumbs(out_path, img):
     ''' Substitute /var/ftp for https link '''
     url = thumb.replace(ftp_root, url_root)
     return url
-"""
-
-'''
 def gettotal(tfile):
     with tarfile.open(tfile, 'r') as tar:
         return len(tar.getnames())
-'''
-
+"""
 
 def update_thumbnail(datastream, thumb):
     log.info(f'[UPDATING THUMBNAIL] {thumb}')
@@ -301,14 +297,12 @@ def main(args):
     log.info('**==========================================**')
 
 
-if __name__ == '__main__':
-    counter = Value('i', 0)
-    tarcounter = Value('i', 0)
+def getargs():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
-         description='''Tarred Image Extractor
+        description='''Tarred Image Extractor
     This script extracts jpg and png images from tar files in /data/archive to the quicklooks ftp. 
     Any images found that have already been extracted have symlinks created instead.''',
-         epilog='''Example usages:
+        epilog='''Example usages:
     Supply datastreams as values to the -D [--datastreams] argument directly:\n
         $ %(prog)s -D sgp30ebbrE10.b1 nsatwrcam40mC1.a1\n
     Use the -A [--all] argument to process all datastreams with image var names:\n
@@ -333,7 +327,14 @@ if __name__ == '__main__':
     logargs.add_argument('-s', '--supertrace', dest='loglevel', const='SUPERTRACE', action='store_const',
                          help='Set logging output to SUPERTRACE. Do not use this unless you want to see millions of file paths logged.')
     # logargs.add_argument('-l', '--log', dest='loglevel', choices=['TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    counter = Value('i', 0)
+    tarcounter = Value('i', 0)
+
+    args = getargs()
     ftp_root = args.output_dir
 
     log.remove()
