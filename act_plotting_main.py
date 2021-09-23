@@ -1,8 +1,5 @@
 #!/usr/bin/env python
-
 import argparse
-
-import PIL
 import numpy as np
 import act
 import pyart
@@ -11,24 +8,17 @@ from datetime import datetime, timedelta
 import json
 import glob
 import cartopy
-import astral
 import os
-import csv
 import math
 import sys
 from PIL import Image
 import multiprocessing
 from itertools import product, groupby
 from loguru import logger as log
-import time
 import re
 from functools import partial
 import copy
-
-import crontab
-
 from pathlib import Path
-
 import psycopg2
 from settings import DB_SETTINGS
 
@@ -828,6 +818,7 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
             log.warning(f'[No plots generated for datastream] [{dsname}]')
 
 
+# TODO: Move this and the other default ACT functions to a separate file.
 def getArgs():
     parser = argparse.ArgumentParser(description='Create GeoDisplay Plot')
     parser.add_argument('-days', '--num_days', type=str,
