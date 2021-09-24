@@ -607,9 +607,8 @@ def main(args):
 
     print('This should be one of the last thing printed.')
 
-def debug_only(record):
-    return record['level'].name == 'DEBUG'
 
+# TODO: Add proper README.md
 if __name__ == '__main__':
     started = datetime.now()
     log.info('[BEGIN]', started,'\n--------------------------------------------\n')
@@ -617,7 +616,8 @@ if __name__ == '__main__':
     log.remove()
     log.add(args.log_file, level='INFO', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
             format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >4}</lvl> | <lvl>{message}</lvl>')
-    log.add('logs/debug.log', filter=debug_only, enqueue=True, colorize=True, rotation='100 MB')
+    log.add('logs/debug.log', enqueue=True, colorize=True, rotation='100 MB',
+            filter=lambda record: record['level'].name == 'DEBUG')
     main(args)
     log.info('Done with all!\n')
     elapsed_time = datetime.now() - started
