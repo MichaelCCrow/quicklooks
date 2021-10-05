@@ -5,6 +5,9 @@ test/
 tmp/
 txt/
 diff/
+out/
+res/
+__pycache__/
 
 ### STS ###
 .apt_generated
