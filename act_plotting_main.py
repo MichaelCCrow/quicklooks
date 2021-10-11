@@ -391,7 +391,11 @@ def processPm(args, dsname, data_file_path, pm):
         return
 
     try:
-        dataset = act.io.armfiles.read_netcdf(data_file_path)
+        try:
+            dataset = act.io.armfiles.read_netcdf(data_file_path)
+        except Exception as e:
+            log.error(f'[FAILED][ACT][could not read netcdf file using ACT library] {data_file_path} [REASON] {e}')
+            return
         if pm not in dataset.data_vars.keys():
             log.debug(f'[SKIPPING][measurement-not-in-cdf] [{pm}] [{os.path.basename(data_file_path)}]')
             dataset.close()
