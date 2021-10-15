@@ -267,6 +267,8 @@ def main(args):
     # datastreams = [('marcamseastateM1.a1', 'jpg')] # used to test symlinks
     log.debug(datastreams)
     prog = 0
+    if type(datastreams) is not tuple:
+        datastreams = (datastreams, )
 
     for datastream, img_type in datastreams:
         with tarcounter.get_lock():
@@ -279,7 +281,7 @@ def main(args):
             log.warning(f'[DOES NOT EXIST] {datastream_dir}')
             continue
 
-        files = os.listdir(datastream_dir)
+        files = set(os.listdir(datastream_dir))
         log.info(f'[{datastream_dir}] {len(files)}')
 
         tarfiles = [ join(datastream_dir, file) for file in files if file.endswith('.tar') ]
