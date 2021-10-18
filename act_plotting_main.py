@@ -9,17 +9,20 @@ import psycopg2
 import numpy as np
 import matplotlib.pyplot as plt
 import multiprocessing
+from time import process_time
 from socket import gethostname
 from datetime import datetime, timedelta
 from PIL import Image
 from loguru import logger as log
 from itertools import product, groupby
-from functools import partial
+from functools import partial, partialmethod, wraps
 from pathlib import Path
 
 from quicklooks.args import getparser
 from settings import DB_SETTINGS
 
+progress_counter = None
+total_counter = None
 
 def getDBConnection():
     dbname = "dbname='" + DB_SETTINGS['dbname'] + "' "
@@ -42,6 +45,17 @@ def getDBConnection():
         if dbConnection is not None:
             return dbConnection
 
+def timer(f):
+    @wraps(f)
+    def wrapper_timer(*args, **kwargs):
+        start_time = process_time()
+        value = f(*args, **kwargs)
+        run_time = process_time() - start_time
+        log.info(f'[time][{f.__name__!r}] {run_time}s')
+        return value
+    return wrapper_timer
+
+
 def get_file_date(filePath):
     strDate = os.path.basename(os.path.normpath(filePath)).split('.')[2]
     return datetime.strptime(strDate, '%Y%m%d')
@@ -57,6 +71,8 @@ def offsetDays(file, days=1):
     offset = datetime.fromtimestamp(file.stat().st_mtime) + timedelta(days=int(days))
     return offset > datetime.today()
 
+
+# @timer
 def getPathStrs(dataDir):
     pathlistNC = Path(dataDir).glob('**/*.nc')
     # pathlistNC = list(filter(lambda p: offsetDays(p, days), pathlistNC))
@@ -68,6 +84,8 @@ def getPathStrs(dataDir):
 
     return pathStrs
 
+
+# @timer
 def getSortedFileIndices(startDate, dateOffset, pathStrs):
     # print('[getSortedFileIndices]')
     dates = []
@@ -96,6 +114,7 @@ def getSortedFileIndices(startDate, dateOffset, pathStrs):
         currentIdxs = npDatesSortedIdxs[idxStart:sortedDateIdx + 1]
 
     return currentIdxs
+
 
 def getOutputFilePath(siteName, dataStreamName, baseOutDir, figSizeDir, pmResult, dataFilePath):
     dataFname = os.path.basename(dataFilePath)
@@ -129,6 +148,7 @@ def getOutputFilePath(siteName, dataStreamName, baseOutDir, figSizeDir, pmResult
 
     outPath = finalOutputDir + outFilePrefix + pmResult + '.png'
     return outPath
+
 
 def getSegmentName(dataFilePath):
     dataFname = os.path.basename(dataFilePath)
@@ -193,6 +213,7 @@ def getinstcode(dsname):
     groups = re.search(instrument_regex, dsname)
     return groups.group() if groups else None
 
+
 def getyrange(dsname, varname):
     inst = getinstcode(dsname)
     if not inst:
@@ -240,6 +261,7 @@ def getOutputUrl(siteName, dataStreamName, baseOutDir, figSizeDir, pmResult, dat
 
     outPath = finalOutputDir + outFilePrefix + pmResult + '.png'
     return outPath
+
 
 def createGiriInsert(datastreamName, varName, startDate='1990-01-01 00:00:00', endDate='9999-09-09 00:00:00'):
     log.trace(f'[insert][giri_inventory] {datastreamName} : {varName} :: {startDate} - {endDate}')
@@ -299,8 +321,6 @@ def insert_qls_info(q, conn, table):
         log.error(f'[FAILED INSERT][{table}] {q} - [REASON] {e}')
         pass
 
-fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
-fig_size_dirs = ['/.icons', '']
 
 def getEndDates(data_file_paths):
     end_dates = {}
@@ -312,20 +332,16 @@ def getEndDates(data_file_paths):
     return end_dates
 
 
-def filter_bad_matches(ds, pm):
-    if pm in act.io.armfiles.read_netcdf(ds).data_vars.keys():
-        return (ds, pm)
-    else: log.debug(f'[pm not in cdf] {pm} {ds}')
-
 def readDatastreamsFromSiteTxt(site):
     site_datastreams_file = site+'.txt'
     if os.path.isfile(site_datastreams_file):
         with open(site_datastreams_file, 'r') as site_datastreams:
-            return site_datastreams.readlines()
+            return set(site_datastreams.readlines())
     else:
         err = f'!![ERROR]!! Failed to read site txt file: {site_datastreams_file}'
         log.error(err)
         sys.stderr.write(err)
+
 
 def buildPrimaryMeasurementDict(ds_names):
     ds_dict = {}
@@ -380,7 +396,12 @@ def update_ql_tables(urlStr, dsname, pm, end_dates):
     conn.close()
 
 
+fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
+fig_size_dirs = ['/.icons', '']
+
+
 def processPm(args, dsname, data_file_path, pm):
+    global progress_counter
     idx_started = datetime.now()
     log.debug(f'[{data_file_path.split("/")[5]}] [{pm}]')
 
@@ -389,6 +410,8 @@ def processPm(args, dsname, data_file_path, pm):
     if fsize > args.max_file_size:  # exclude if file size is > 100MB
         log.warning(f'File too large: {data_file_path} : [{fsize}]')
         return
+
+    site_name = dsname[0:3]
 
     try:
         try:
@@ -407,7 +430,6 @@ def processPm(args, dsname, data_file_path, pm):
         return
 
     imgpath = ''
-    site_name = dsname[0:3]
 
     # required for timeseries plotting method
     args.field = pm
@@ -419,11 +441,15 @@ def processPm(args, dsname, data_file_path, pm):
         args.figsize = fig_sizes[idx]
         args.out_path = getOutputFilePath(site_name, dsname, args.base_out_dir, fig_size_dir,
                                           pm, data_file_path)
+        with progress_counter.get_lock():
+            progress_counter.value += 1
 
+        # TODO: Once Elastic is implemented, remove the table inserts, as they will no longer be needed.
         # TODO: When generating NEW plots, this will not put the URLs in the database since they don't exist. #FIXME
         if os.path.exists(args.out_path):
             urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
             update_ql_tables(urlStr, dsname, pm, args.end_dates)
+            log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value/total_counter.value)*100)}%\r')
             continue
 
         if idx == 1:
@@ -437,8 +463,19 @@ def processPm(args, dsname, data_file_path, pm):
             args.action(args) # now executes any methods flagged from command line args
             if idx == 1:
                 imgpath = args.out_path
+            elif args.index:
+                # thumbnail for the .icons sub directory
+                thumbnail = args.out_path
+                if os.path.getsize(thumbnail) <= 409:
+                    log.info(f'[blank] {thumbnail}')
+                    log.index(thumbnail+'.blank')
+                else:
+                    log.index(thumbnail)
             log.info(f'[plot-generated] {args.out_path}')
         except Exception as e:
+            from traceback import print_exc
+            log.error(e)
+            print_exc()
             errmsg = f'[FAILED] [{data_file_path}] [{pm}] -- [REASON] [{e}]'
             log.error(errmsg)
             if os.access('/tmp/bad_datastreams.txt', os.W_OK):
@@ -468,6 +505,7 @@ def processPm(args, dsname, data_file_path, pm):
 
 
 def getPrimaryForDs(args, dsname, ds_dir, pm_list):
+    global total_counter
     log.info('\n**************************************')
     log.info(f'[PROCESSING][datastream] [{dsname}]')
     log.info(f'[input-directory] [{ds_dir}]')
@@ -477,8 +515,6 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
     if len(path_strs) == 0:
         log.info(f'No new files for datastream [{dsname}]')
         return
-
-    out_dir = args.base_out_dir + os.path.basename(ds_dir)
     args.dsname = dsname # required for other methods to find the dsname
 
     current_idxs = getSortedFileIndices(args.start_date, args.num_days, path_strs)
@@ -486,13 +522,15 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
     num_to_process = len(current_idxs)
     log.info(f'[files-to-process] [{num_to_process} out of {len(path_strs)}]')
     log.info(f'[measurements] [{len(pm_list)}] {pm_list}')
-    log.info(f'[pngs-to-generate] [{num_to_process * len(pm_list) * 2}]')
-    log.info(f'[current-output-directory] [{out_dir}]\n')
+    num_pngs_to_generate = num_to_process * len(pm_list) * 2
+    log.info(f'[pngs-to-generate] [{num_pngs_to_generate}]')
+    # log.info(f'[current-output-directory] [{out_dir}]\n')
+    with total_counter.get_lock():
+        total_counter.value = num_pngs_to_generate
 
-    # TODO: Save these paths to a file or database table to be indexed into Elastic Search
-    data_file_paths = np.array(path_strs)[current_idxs]
-    # data_file_paths = [file_path for file_path in data_file_paths for r in result_list if
-    #                    r in act.io.armfiles.read_netcdf(file_path).data_vars.keys()]
+    data_file_paths = np.array(path_strs)[current_idxs] # [ /data/archive/nsa/nsa30ecorE10.b1/nsa30ecorE10.b1.20210925.000000.cdf, ...]
+
+    # TODO: Consider creating a map/dict/tuple of input to output paths and filtering existing output paths from the list to help improve performance
     partial_processPm = partial(processPm, copy.deepcopy(args), dsname)
 
     with multiprocessing.Pool(int(args.num_t)) as pool:
@@ -541,7 +579,14 @@ def getArgs():
     #                     help='silence a lot of the logging output')
 
     parser.add_argument('-baseOut', '--base-out-dir', type=str, default='/data/ql_plots/',
-                        help='Base Out Directory to use for saving Plot')
+                        help='Base Out Directory to use for saving Plot. Do not use default. (default %(default)s)')
+    parser.add_argument('--debug-log-file', type=str, default='logs/debug.log',
+                        help='Full file path to debug log file. (default: %(default)s)')
+    parser.add_argument('--index', '--write-index-txt', dest='index', action='store_true',
+                        help='Flag to indicate that Elasticsearch index files should be written to. '
+                             'The base directory is the same as the value for the --base-out-dir argument. '
+                             'NOTE: This argument is primarily intended to be omitted for debugging and testing and '
+                             'should ALWAYS be true in production, or files will be missed.')
 
     '''These are not used from the command line - they are set later in the program'''
     # parser.add_argument('-f', '--file-path', type=str, help='File to use for creating Plot')
@@ -551,6 +596,8 @@ def getArgs():
 
 
 def main(args):
+    global total_counter
+    global progress_counter
     sites = args.site_list.split(',')
     log.info('[sites]', sites)
 
@@ -608,20 +655,49 @@ def main(args):
             ds_dir = data_file_paths[ds_names.index(ds)]
             getPrimaryForDs(args, ds, ds_dir, pm_list)
             count = checkprogress(count)
+            with total_counter.get_lock():
+                total_counter.value = 0
+            with progress_counter.get_lock():
+                progress_counter.value = 0
+    # print('This should be one of the last thing printed.')
 
-    print('This should be one of the last thing printed.')
+
+def _get_index_file(index_base_dir, plot_file_path):
+    year = plot_file_path.split('/')[4] if plot_file_path.startswith('/var/ftp/quicklooks') else re.search('(?<=\/)\d{4}(?=\/)', plot_file_path).group()
+    idxfile = f'index.{year}.txt'
+    index_file_path = os.path.join(index_base_dir, year, idxfile)
+    os.makedirs(os.path.dirname(index_file_path), exist_ok=True)
+    # return index_file_path # 1
+    # return open(index_file_path, 'a') # 2
+    print(plot_file_path, file=open(index_file_path, 'a'), end='') # 3
+    # with open(index_file_path, 'a') as f: # 3.1
+    #     print(plot_file_path, file=f, end='')
 
 
 # TODO: Add proper README.md
 if __name__ == '__main__':
     started = datetime.now()
-    log.info('[BEGIN]', started,'\n--------------------------------------------\n')
     args = getArgs()
+
     log.remove()
     log.add(args.log_file, level='INFO', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
             format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >4}</lvl> | <lvl>{message}</lvl>')
-    log.add('logs/debug.log', enqueue=True, colorize=True, rotation='100 MB',
+    log.info('[BEGIN]', started, '\n--------------------------------------------\n')
+    log.add(args.debug_log_file, enqueue=True, colorize=True, rotation='100 MB', compression='zip',
             filter=lambda record: record['level'].name == 'DEBUG')
+    if args.index:
+        log.level('INDEX', no=2)
+        log.__class__.index = partialmethod(log.__class__.log, 'INDEX')
+        # log.add(lambda msg: print(msg, file=open(_get_index_file(msg, args.index_log_dir), 'a'), end=''), # 1
+        # log.add(lambda msg: print(msg, file=_get_index_file(msg, args.index_log_dir), end=''), # 2
+        # log.add(lambda msg: _get_index_file(msg, args.index_log_dir), # 3
+        partial__get_index_file = partial(_get_index_file, args.base_out_dir)
+        log.add(partial__get_index_file, enqueue=True, colorize=False,
+                filter=lambda record: record['level'].name == 'INDEX',
+                level='INDEX',
+                format='{message}')
+    progress_counter = multiprocessing.Value('i', 0)
+    total_counter = multiprocessing.Value('i', 0)
     main(args)
     log.info('Done with all!\n')
     elapsed_time = datetime.now() - started
