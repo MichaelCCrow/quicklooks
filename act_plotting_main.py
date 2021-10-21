@@ -72,7 +72,7 @@ def offsetDays(file, days=1):
     return offset > datetime.today()
 
 
-# @timer
+@timer
 def getPathStrs(dataDir):
     pathlistNC = Path(dataDir).glob('**/*.nc')
     # pathlistNC = list(filter(lambda p: offsetDays(p, days), pathlistNC))
@@ -390,6 +390,9 @@ def update_ql_tables(urlStr, dsname, pm, end_dates):
     pre_selected_qls_info_insert_query = createPreSelectInsert(dsname, pm, urlStr, endDate=end_dates[dsname])
     giri_inventory_insert_query = createGiriInsert(dsname, pm, endDate=end_dates[dsname])
     conn = getDBConnection()
+    if conn is None:
+        log.critical(f'Database connection failed. Quicklooks tables were not updated. {urlStr}')
+        return
     with conn:
         insert_qls_info(pre_selected_qls_info_insert_query, conn, 'pre_selected_qls_info')
         insert_qls_info(giri_inventory_insert_query, conn, 'giri_inventory')
@@ -403,7 +406,7 @@ fig_size_dirs = ['/.icons', '']
 def processPm(args, dsname, data_file_path, pm):
     global progress_counter
     idx_started = datetime.now()
-    log.debug(f'[{data_file_path.split("/")[5]}] [{pm}]')
+    log.debug(f'[{data_file_path.split("/")[5]}] [{pm}] | {progress_counter.value}/{total_counter.value}')
 
     args.file_path = data_file_path # required for timeseries function
     fsize = os.path.getsize(data_file_path)
@@ -412,6 +415,20 @@ def processPm(args, dsname, data_file_path, pm):
         return
 
     site_name = dsname[0:3]
+    iconpath = getOutputFilePath(site_name, dsname, args.base_out_dir, fig_size_dirs[0], pm, data_file_path)
+    full_plot_path = iconpath.replace(fig_size_dirs[0], fig_size_dirs[1])
+    outpaths = [ iconpath, full_plot_path ]
+
+    thumb_exists = os.path.exists(outpaths[0])
+    img_exists = os.path.exists(outpaths[1])
+    if thumb_exists and img_exists:
+        with progress_counter.get_lock():
+            progress_counter.value += 2
+            log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value / total_counter.value) * 100)}%\r')
+        # Check if we've already inserted a url for this datastream
+        # urlStr = outpaths[0].replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
+        # update_ql_tables(urlStr, dsname, pm, args.end_dates)
+        return
 
     try:
         try:
@@ -437,19 +454,21 @@ def processPm(args, dsname, data_file_path, pm):
 
     # TODO: Figure out how to remove the necessity for a loop
     for idx in range(2):
-        fig_size_dir = fig_size_dirs[idx]
+        # fig_size_dir = fig_size_dirs[idx]
         args.figsize = fig_sizes[idx]
-        args.out_path = getOutputFilePath(site_name, dsname, args.base_out_dir, fig_size_dir,
-                                          pm, data_file_path)
+        args.out_path = outpaths[idx]
+        # args.out_path = getOutputFilePath(site_name, dsname, args.base_out_dir, fig_size_dir,
+        #                                   pm, data_file_path)
         with progress_counter.get_lock():
             progress_counter.value += 1
 
         # TODO: Once Elastic is implemented, remove the table inserts, as they will no longer be needed.
         # TODO: When generating NEW plots, this will not put the URLs in the database since they don't exist. #FIXME
-        if os.path.exists(args.out_path):
-            urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
-            update_ql_tables(urlStr, dsname, pm, args.end_dates)
+        # if os.path.exists(args.out_path):
+        if (idx==0 and thumb_exists) or (idx==1 and img_exists):
             log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value/total_counter.value)*100)}%\r')
+            # urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
+            # update_ql_tables(urlStr, dsname, pm, args.end_dates)
             continue
 
         if idx == 1:
@@ -474,7 +493,6 @@ def processPm(args, dsname, data_file_path, pm):
             log.info(f'[plot-generated] {args.out_path}')
         except Exception as e:
             from traceback import print_exc
-            log.error(e)
             print_exc()
             errmsg = f'[FAILED] [{data_file_path}] [{pm}] -- [REASON] [{e}]'
             log.error(errmsg)
@@ -508,7 +526,7 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
     global total_counter
     log.info('\n**************************************')
     log.info(f'[PROCESSING][datastream] [{dsname}]')
-    log.info(f'[input-directory] [{ds_dir}]')
+    log.info(f'[input-directory] [{ds_dir}] listing files...')
 
     # Unfiltered list of cdf files in the datastream directory
     path_strs = getPathStrs(ds_dir)
@@ -568,6 +586,7 @@ def getArgs():
                         the name of the sites will be the relative name for the text file. 
                         Example: "-sites anx --use-txt-file", a file named "anx.txt" must exist within 
                         the same directory and contain newline-separated names of datastreams.''')
+    # TODO: Add argument for running given datastreams only, just like the argument in the image extractor script
     parser.add_argument('-maxFs', '--max-file-size', type=int, default=100000000, dest='max_file_size',
                         help='max file size in number of bytes - default is 100000000 (100MB)')
     parser.add_argument('--log-file', type=str,
