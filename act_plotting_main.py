@@ -568,6 +568,45 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
             log.warning(f'[No plots generated for datastream] [{dsname}]')
 
 
+class ReadDatastreamTxtsAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        log.info(option_string)
+        if option_string == '--use-txt-dir' or option_string == '-txtdir':
+            setattr(namespace, self.dest, self.datastream_txts())
+            return
+        txtfiles = [ v for v in values if os.path.isfile(v) ]
+        notfiles = [ v for v in values if v not in txtfiles ]
+        if notfiles: log.warning(f'[not files] {notfiles}')
+        ds = self.read_txts(txtfiles)
+        setattr(namespace, self.dest, ds)
+
+    def read_txts(self, txts):
+        ds = []
+        for txt in txts:
+            with open(txt, 'r') as f:
+                lines = f.read().splitlines()
+                ds += lines
+                # for line in lines: ds.append(line)
+        log.debug(ds)
+        return ds
+
+    def datastream_txts(self, txtdir='txt'):
+        if not os.path.isdir(txtdir):
+            log.error(f'[directory does not exist] {txtdir}')
+            raise argparse.ArgumentError(None, message=f'["{txtdir}/" directory does not exist] '
+                                                       f'The {txtdir} directory is required to exist in the same relative '
+                                                       f'directory as this script in order to use this argument.\n'
+                                                       f'Run {os.path.basename(sys.argv[0])} -h for usage details.')
+        txts = os.listdir(txtdir)
+        # txt files must be a 3-letter site code with '.txt' extension
+        pat = re.compile('^[a-z]{3}\.txt$')
+        # nomatch = [ t for t in txts if not re.match(pat, t) ]
+        txts = [os.path.join(txtdir, t) for t in txts if re.match(pat, t)]
+        txts.sort()
+        log.debug(f'[using txts] {txts}')
+        return self.read_txts(txts)
+
+
 def getArgs():
     parent = getparser()
     subparser = argparse.ArgumentParser(description='Create GeoDisplay Plot', parents=[parent])
@@ -576,24 +615,38 @@ def getArgs():
                         help='number of days offset')
     parser.add_argument('-nt', '--num_t', type=str,
                         help='Max number of threads')
-    parser.add_argument('-sites', '--site_list', type=str,
-                        help='comma separated list of sites')
-    # parser.add_argument('-sitestxt', '--site_txt', type=str,
-    #                     help='comma separated list of sites')
-    parser.add_argument('-useTxtFile', '--use-txt-file', dest='use_txt_file', action='store_true', default=False,
-                        help='''Indicates to use a .txt file in the same directory which contains a 
+
+    dsargs = subparser.add_argument_group('datastream selection required arguments').add_mutually_exclusive_group(required=True)
+
+    # ------------------ Depreciated args -------------------- #
+    dsargs.add_argument('-sites', '--site_list', type=str,
+                        help='(DEPRECIATED) comma separated list of sites')
+    dsargs.add_argument('-useTxtFile', '--use-txt-file', dest='use_txt_file', action='store_true', default=False,
+                        help='''(DEPRECIATED) Indicates to use a .txt file in the same directory which contains a 
                         static list of datastreams to process. Used in conjunction with the -sites argument, 
                         the name of the sites will be the relative name for the text file. 
                         Example: "-sites anx --use-txt-file", a file named "anx.txt" must exist within 
                         the same directory and contain newline-separated names of datastreams.''')
-    # TODO: Add argument for running given datastreams only, just like the argument in the image extractor script
+    # -------------------------------------------------------- #
+
+    # TODO: Add functionality for this
+    # dsargs.add_argument('-sites2', '--site-list', nargs='+', dest='sites',
+    #                     help='Sites for which to process datastreams, excluding the following data levels: .a1 .a0 .00 | Example: -sites sgp nsa ena')
+    dsargs.add_argument('-D', '--datastreams', nargs='+', metavar='datastream',
+                        help='Datastreams to process. Provide each datastream separated by a space. Example: -D sgp30ebbrE10.b1 nsa30ebbrE10.b1')
+    dsargs.add_argument('-txtfiles', '--datastream-txts', nargs='+', dest='datastreams', metavar='file.txt', action=ReadDatastreamTxtsAction,
+                        help='Provide a space separated list of paths to datastream txt files. Example: -txt nsa.txt subdir/sgp.txt tempENA.txt')
+    dsargs.add_argument('-txtdir', '--use-txt-dir', nargs=0, dest='datastreams', action=ReadDatastreamTxtsAction,
+                        help='Signals to to the script to use only the txt files found in the relative subdirectory "txt".'
+                             'Only files named with 3-letter site code and ".txt" extension will be used. Others will be ignored.')
+
     parser.add_argument('-maxFs', '--max-file-size', type=int, default=100000000, dest='max_file_size',
                         help='max file size in number of bytes - default is 100000000 (100MB)')
     parser.add_argument('--log-file', type=str,
                         default=sys.stderr if gethostname()=='mcmbpro' else 'logs/act.log',
                         help='File to write output logs to. Should end with ".log". (default: %(default)s)')
-    parser.add_argument('--log-by-site', action='store_true', default=False,
-                        help='If given, the logs will be separated by site name, ending with ".[site].log".')
+    # parser.add_argument('--log-by-site', action='store_true', default=False,
+    #                     help='If given, the logs will be separated by site name, ending with ".[site].log".')
     # parser.add_argument('-q', '--quiet', action='store_false',
     #                     help='silence a lot of the logging output')
 
@@ -629,11 +682,11 @@ def main(args):
 
     log.info('-- reading datastreams from site txt --')
     for site in sites:
-        if args.log_by_site:
-            log.remove()
-            logfile = args.log_file.replace('.log', f'.{site}.log')
-            log.add(logfile, level='INFO', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
-                    format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >5}</lvl> | <lvl>{message}</lvl>')
+        # if args.log_by_site:
+        #     log.remove()
+        #     logfile = args.log_file.replace('.log', f'.{site}.log')
+        #     log.add(logfile, level='INFO', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
+        #             format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >5}</lvl> | <lvl>{message}</lvl>')
         log.info('********************************************************\n')
         log.info(f'[Processing][site] [{site}]')
 
