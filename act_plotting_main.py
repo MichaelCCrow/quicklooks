@@ -100,7 +100,7 @@ def getSortedFileIndices(startDate, dateOffset, pathStrs):
 
     currentIdxs = []
     if startDate == 'current':
-        startIdx = -1 if int(dateOffset) == 0 else -1 * int(dateOffset)
+        startIdx = -1 if dateOffset == 0 else -1 * dateOffset
         currentIdxs = npDatesSortedIdxs[startIdx:]
     else:
         dateStrs = list(map(getDateStr, dates))
@@ -554,7 +554,7 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
     # TODO: Consider creating a map/dict/tuple of input to output paths and filtering existing output paths from the list to help improve performance
     partial_processPm = partial(processPm, copy.deepcopy(args), dsname)
 
-    with multiprocessing.Pool(int(args.num_t)) as pool:
+    with multiprocessing.Pool(args.num_threads) as pool:
         img_started = datetime.now()
         image_paths = pool.starmap(partial_processPm, product(data_file_paths, pm_list))
 
@@ -613,9 +613,9 @@ def getArgs():
     parent = getparser()
     subparser = argparse.ArgumentParser(description='Create GeoDisplay Plot', parents=[parent])
     parser = subparser.add_argument_group('wrapper script arguments')
-    parser.add_argument('-days', '--num_days', type=str,
-                        help='number of days offset')
-    parser.add_argument('-nt', '--num_t', type=str,
+    parser.add_argument('-days', '--num-days', type=int,
+                        help='Number of days offset from latest file date to process')
+    parser.add_argument('-nt', '--num-threads', type=int,
                         help='Max number of threads')
 
     dsargs = subparser.add_argument_group('datastream selection required arguments').add_mutually_exclusive_group(required=True)
@@ -631,7 +631,7 @@ def getArgs():
                              'Only files named with 3-letter site code and ".txt" extension will be used. Others will be ignored.')
 
     parser.add_argument('-maxFs', '--max-file-size', type=int, default=100000000, dest='max_file_size',
-                        help='max file size in number of bytes - default is 100000000 (100MB)')
+                        help='Max file size in number of bytes - default is 100000000 (100MB)')
     parser.add_argument('--log-file', type=str,
                         default=sys.stderr if gethostname()=='mcmbpro' else 'logs/act.log',
                         help='File to write output logs to. Should end with ".log". (default: %(default)s)')
@@ -724,7 +724,7 @@ def _get_index_file(index_base_dir, plot_file_path):
 # TODO: Add proper README.md
 if __name__ == '__main__':
     started = datetime.now()
-    if not os.getcwd().startswith('/apps/adc/act/quicklooks/dailyquicklooks'): log.remove() # remove log if not prod
+    if os.getcwd().startswith('/apps/adc/act/quicklooks/dailyquicklooks'): log.remove() # remove log from arg parsing if prod
     args = getArgs()
 
     log.remove()

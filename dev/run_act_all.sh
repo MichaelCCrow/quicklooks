@@ -14,5 +14,12 @@ conda activate plotting_env
 ls /data/archive/guc/ | grep -vE '.00' > guc.txt
 #ls /data/archive/hou/ | grep -vE '.00' > hou.txt
 
-python act_plotting_main.py -nt 20 -sites hou,mos,cor,anx,oli,guc,nsa,ena,sgp -useTxtFile -days 120 -baseOut /var/ftp/quicklooks/ -p -ts -maxFs 200000000 >> logs/act.$(date +\%Y\%m\%d).log 2>&1
+python act_plotting_main.py \
+  -p -ts \
+  --num-threads 20 \
+  --num-days 120 \
+  --base-out-dir /var/ftp/quicklooks/ \
+  --max-file-size 200000000 \
+  --use-txt-dir \
+  >> logs/act.$(date +\%Y\%m\%d).log 2>&1
 
