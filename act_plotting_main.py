@@ -333,17 +333,6 @@ def getEndDates(data_file_paths):
     return end_dates
 
 
-def readDatastreamsFromSiteTxt(site):
-    site_datastreams_file = site+'.txt'
-    if os.path.isfile(site_datastreams_file):
-        with open(site_datastreams_file, 'r') as site_datastreams:
-            return set(site_datastreams.readlines())
-    else:
-        err = f'!![ERROR]!! Failed to read site txt file: {site_datastreams_file}'
-        log.error(err)
-        sys.stderr.write(err)
-
-
 def buildPrimaryMeasurementDict(ds_names):
     ds_dict = {}
     for ds in ds_names:
@@ -630,27 +619,13 @@ def getArgs():
                         help='Max number of threads')
 
     dsargs = subparser.add_argument_group('datastream selection required arguments').add_mutually_exclusive_group(required=True)
-
-    # ------------------ Depreciated args -------------------- #
-    """
-    dsargs.add_argument('-sites', '--site_list', type=str,
-                        help='(DEPRECIATED) comma separated list of sites')
-    dsargs.add_argument('-useTxtFile', '--use-txt-file', dest='use_txt_file', action='store_true', default=False,
-                        help='''(DEPRECIATED) Indicates to use a .txt file in the same directory which contains a 
-                        static list of datastreams to process. Used in conjunction with the -sites argument, 
-                        the name of the sites will be the relative name for the text file. 
-                        Example: "-sites anx --use-txt-file", a file named "anx.txt" must exist within 
-                        the same directory and contain newline-separated names of datastreams.''')
-    """
-    # -------------------------------------------------------- #
-
     # TODO: Add functionality for this
     # dsargs.add_argument('-sites2', '--site-list', nargs='+', dest='sites',
     #                     help='Sites for which to process datastreams, excluding the following data levels: .a1 .a0 .00 | Example: -sites sgp nsa ena')
     dsargs.add_argument('-D', '--datastreams', nargs='+', metavar='datastream',
                         help='Datastreams to process. Provide each datastream separated by a space. Example: -D sgp30ebbrE10.b1 nsa30ebbrE10.b1')
     dsargs.add_argument('-txtfiles', '--datastream-txts', nargs='+', dest='datastreams', metavar='file.txt', action=ReadDatastreamTxtsAction,
-                        help='Provide a space separated list of paths to datastream txt files. Example: -txt nsa.txt subdir/sgp.txt tempENA.txt')
+                        help='Provide a space separated list of paths to datastream txt files. Example: -txtfiles nsa.txt subdir/sgp.txt tempENA.txt')
     dsargs.add_argument('-txtdir', '--use-txt-dir', nargs=0, dest='datastreams', action=ReadDatastreamTxtsAction,
                         help='Signals to to the script to use only the txt files found in the relative subdirectory "txt".'
                              'Only files named with 3-letter site code and ".txt" extension will be used. Others will be ignored.')
@@ -660,17 +635,12 @@ def getArgs():
     parser.add_argument('--log-file', type=str,
                         default=sys.stderr if gethostname()=='mcmbpro' else 'logs/act.log',
                         help='File to write output logs to. Should end with ".log". (default: %(default)s)')
-    # parser.add_argument('--log-by-site', action='store_true', default=False,
-    #                     help='If given, the logs will be separated by site name, ending with ".[site].log".')
-    # parser.add_argument('-q', '--quiet', action='store_false',
-    #                     help='silence a lot of the logging output')
-
     parser.add_argument('-baseOut', '--base-out-dir', type=str, default='/data/ql_plots/',
                         help='Base Out Directory to use for saving Plot. Do not use default. (default %(default)s)')
     parser.add_argument('--debug-log-file', type=str, default='logs/debug.log',
                         help='Full file path to debug log file. (default: %(default)s)')
     parser.add_argument('--index', '--write-index-txt', dest='index', action='store_true',
-                        help='Flag to indicate that Elasticsearch index files should be written to. '
+                        help='Flag to indicate that index files should be written to for ElasticSearch to pick up. '
                              'The base directory is the same as the value for the --base-out-dir argument. '
                              'NOTE: This argument is primarily intended to be omitted for debugging and testing and '
                              'should ALWAYS be true in production, or files will be missed.')
@@ -686,33 +656,21 @@ def main(args):
     global total_counter
     global progress_counter
 
-    # if not args.use_txt_file:
     if not args.datastreams: # This should never occur since args are required and mutually exclusive
         print(
             '[WARNING] This will attempt to get all datastreams for a given site. This is not recommended and not guaranteed to work. '
             'Please use the --use-txt-file flag and provide a file in the same directory containing a list of datastreams to process, '
             'named like sgp.txt or anx.txt. If you wish to try this anyway, uncomment the proceeding lines in main().')
         sys.exit(1)
+    if not args.index:
+        log.warning('Index flag is not set. New plots will not be added to the index.txts and ElasticSearch will be out of sync.')
+        sys.stderr.write('Index flag is not set. New plots will not be added to the index.txts and ElasticSearch will be out of sync.')
 
     # sites = set([ ds[:3] for ds in args.datastreams ])
     site_ds_grouped = [(site, list(dsnames)) for site, dsnames in groupby(args.datastreams, lambda ds: ds[:3])]
     for site, ds_names in site_ds_grouped:
-
-    # sites = args.site_list.split(',')
-    # log.info('[sites]', sites)
-    #
-    # log.info('-- reading datastreams from site txt --')
-    # for site in sites:
-        # if args.log_by_site:
-        #     log.remove()
-        #     logfile = args.log_file.replace('.log', f'.{site}.log')
-        #     log.add(logfile, level='INFO', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
-        #             format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >5}</lvl> | <lvl>{message}</lvl>')
         log.info('********************************************************\n')
         log.info(f'[Processing][site] [{site}]')
-
-        # ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
-        # print(f'[ds_names] {ds_names}')
         if ds_names is None: continue
         data_file_paths = [os.path.join('/data/archive/', site, ds.strip()) for ds in ds_names]
         data_file_paths = list(filter(lambda p: offsetDays(p, args.num_days), data_file_paths))
@@ -756,21 +714,17 @@ def main(args):
 
 
 def _get_index_file(index_base_dir, plot_file_path):
-    year = plot_file_path.split('/')[4] if plot_file_path.startswith('/var/ftp/quicklooks') else re.search('(?<=\/)\d{4}(?=\/)', plot_file_path).group()
-    # TODO: remove the year from the index file name
-    idxfile = f'index.{year}.txt'
+    year = plot_file_path.split('/')[4] # if plot_file_path.startswith('/var/ftp/quicklooks') else re.search('(?<=\/)\d{4}(?=\/)', plot_file_path).group()
+    idxfile = 'index.txt'
     index_file_path = os.path.join(index_base_dir, year, idxfile)
-    os.makedirs(os.path.dirname(index_file_path), exist_ok=True)
-    # return index_file_path # 1
-    # return open(index_file_path, 'a') # 2
+    # os.makedirs(os.path.dirname(index_file_path), exist_ok=True) # used for testing
     print(plot_file_path, file=open(index_file_path, 'a'), end='') # 3
-    # with open(index_file_path, 'a') as f: # 3.1
-    #     print(plot_file_path, file=f, end='')
 
 
 # TODO: Add proper README.md
 if __name__ == '__main__':
     started = datetime.now()
+    if not os.getcwd().startswith('/apps/adc/act/quicklooks/dailyquicklooks'): log.remove() # remove log if not prod
     args = getArgs()
 
     log.remove()
@@ -782,9 +736,6 @@ if __name__ == '__main__':
     if args.index:
         log.level('INDEX', no=2)
         log.__class__.index = partialmethod(log.__class__.log, 'INDEX')
-        # log.add(lambda msg: print(msg, file=open(_get_index_file(msg, args.index_log_dir), 'a'), end=''), # 1
-        # log.add(lambda msg: print(msg, file=_get_index_file(msg, args.index_log_dir), end=''), # 2
-        # log.add(lambda msg: _get_index_file(msg, args.index_log_dir), # 3
         partial__get_index_file = partial(_get_index_file, args.base_out_dir)
         log.add(partial__get_index_file, enqueue=True, colorize=False,
                 filter=lambda record: record['level'].name == 'INDEX',
