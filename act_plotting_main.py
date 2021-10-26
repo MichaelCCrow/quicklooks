@@ -51,7 +51,8 @@ def timer(f):
         start_time = process_time()
         value = f(*args, **kwargs)
         run_time = process_time() - start_time
-        log.info(f'[time][{f.__name__!r}] {run_time}s')
+        if run_time > 2:
+            log.info(f'[time][{f.__name__!r}] {run_time}s')
         return value
     return wrapper_timer
 
@@ -85,7 +86,7 @@ def getPathStrs(dataDir):
     return pathStrs
 
 
-# @timer
+@timer
 def getSortedFileIndices(startDate, dateOffset, pathStrs):
     # print('[getSortedFileIndices]')
     dates = []
@@ -430,6 +431,7 @@ def processPm(args, dsname, data_file_path, pm):
         # update_ql_tables(urlStr, dsname, pm, args.end_dates)
         return
 
+    started_act_read_cdf = datetime.now()
     try:
         try:
             dataset = act.io.armfiles.read_netcdf(data_file_path)
@@ -445,12 +447,18 @@ def processPm(args, dsname, data_file_path, pm):
         log.critical(f'[FAILED][checking for measurements in cdf file] {data_file_path} [REASON] {e}')
         dataset.close()
         return
+    elapsed = datetime.now() - started_act_read_cdf
+    if elapsed.total_seconds() > 3:
+        log.info(f'[time][act_read_cdf] {elapsed}')
 
     imgpath = ''
 
     # required for timeseries plotting method
     args.field = pm
     args.yrange = getyrange(dsname, pm)
+    # TODO: Fix/update the yranges in the database
+    if args.yrange is None:
+        log.warning(f'[Y-Range not found] {dsname} <-> {pm}')
 
     # TODO: Figure out how to remove the necessity for a loop
     for idx in range(2):
@@ -490,10 +498,14 @@ def processPm(args, dsname, data_file_path, pm):
                     log.index(thumbnail+'.blank')
                 else:
                     log.index(thumbnail)
-            log.info(f'[plot-generated] {args.out_path}')
+            action_time = datetime.now() - action_started
+            if action_time.total_seconds() > 30:
+                log.info(f'[plot-generated] {args.out_path} | [time][>30s] {action_time.total_seconds()}s')
+            else:
+                log.info(f'[plot-generated] {args.out_path}')
         except Exception as e:
-            from traceback import print_exc
-            print_exc()
+            # from traceback import print_exc
+            # print_exc()
             errmsg = f'[FAILED] [{data_file_path}] [{pm}] -- [REASON] [{e}]'
             log.error(errmsg)
             if os.access('/tmp/bad_datastreams.txt', os.W_OK):
@@ -504,6 +516,8 @@ def processPm(args, dsname, data_file_path, pm):
                     print(errmsg, file=f)
         finally:
             action_time = datetime.now() - action_started
+            # if action_time.total_seconds() > 60:
+            #     log.info(f'[time][plot-generation][{os.path.basename(args.out_path)}] {action_time.total_seconds()}s')
             log.trace(f'[time][plot-generation] {action_time}')
 
         # except Exception as e:
@@ -556,7 +570,7 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
         image_paths = pool.starmap(partial_processPm, product(data_file_paths, pm_list))
 
         elapsed = datetime.now() - img_started
-        log.info(f'[time][process-imgs] {elapsed}')
+        log.info(f'[time][process-imgs][{dsname}] {elapsed}')
 
         image_paths = [ i for i in image_paths if i ]
         if len(image_paths) > 0:
@@ -570,7 +584,6 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
 
 class ReadDatastreamTxtsAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
-        log.info(option_string)
         if option_string == '--use-txt-dir' or option_string == '-txtdir':
             setattr(namespace, self.dest, self.datastream_txts())
             return
@@ -619,6 +632,7 @@ def getArgs():
     dsargs = subparser.add_argument_group('datastream selection required arguments').add_mutually_exclusive_group(required=True)
 
     # ------------------ Depreciated args -------------------- #
+    """
     dsargs.add_argument('-sites', '--site_list', type=str,
                         help='(DEPRECIATED) comma separated list of sites')
     dsargs.add_argument('-useTxtFile', '--use-txt-file', dest='use_txt_file', action='store_true', default=False,
@@ -627,6 +641,7 @@ def getArgs():
                         the name of the sites will be the relative name for the text file. 
                         Example: "-sites anx --use-txt-file", a file named "anx.txt" must exist within 
                         the same directory and contain newline-separated names of datastreams.''')
+    """
     # -------------------------------------------------------- #
 
     # TODO: Add functionality for this
@@ -670,18 +685,24 @@ def getArgs():
 def main(args):
     global total_counter
     global progress_counter
-    sites = args.site_list.split(',')
-    log.info('[sites]', sites)
 
-    if not args.use_txt_file:
+    # if not args.use_txt_file:
+    if not args.datastreams: # This should never occur since args are required and mutually exclusive
         print(
             '[WARNING] This will attempt to get all datastreams for a given site. This is not recommended and not guaranteed to work. '
             'Please use the --use-txt-file flag and provide a file in the same directory containing a list of datastreams to process, '
             'named like sgp.txt or anx.txt. If you wish to try this anyway, uncomment the proceeding lines in main().')
         sys.exit(1)
 
-    log.info('-- reading datastreams from site txt --')
-    for site in sites:
+    # sites = set([ ds[:3] for ds in args.datastreams ])
+    site_ds_grouped = [(site, list(dsnames)) for site, dsnames in groupby(args.datastreams, lambda ds: ds[:3])]
+    for site, ds_names in site_ds_grouped:
+
+    # sites = args.site_list.split(',')
+    # log.info('[sites]', sites)
+    #
+    # log.info('-- reading datastreams from site txt --')
+    # for site in sites:
         # if args.log_by_site:
         #     log.remove()
         #     logfile = args.log_file.replace('.log', f'.{site}.log')
@@ -690,7 +711,7 @@ def main(args):
         log.info('********************************************************\n')
         log.info(f'[Processing][site] [{site}]')
 
-        ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
+        # ds_names = [ ds.strip() for ds in readDatastreamsFromSiteTxt(site) ]
         # print(f'[ds_names] {ds_names}')
         if ds_names is None: continue
         data_file_paths = [os.path.join('/data/archive/', site, ds.strip()) for ds in ds_names]
@@ -736,6 +757,7 @@ def main(args):
 
 def _get_index_file(index_base_dir, plot_file_path):
     year = plot_file_path.split('/')[4] if plot_file_path.startswith('/var/ftp/quicklooks') else re.search('(?<=\/)\d{4}(?=\/)', plot_file_path).group()
+    # TODO: remove the year from the index file name
     idxfile = f'index.{year}.txt'
     index_file_path = os.path.join(index_base_dir, year, idxfile)
     os.makedirs(os.path.dirname(index_file_path), exist_ok=True)
