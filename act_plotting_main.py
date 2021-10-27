@@ -720,6 +720,11 @@ if __name__ == '__main__':
     if os.getcwd().startswith('/apps/adc/act/quicklooks/dailyquicklooks'): log.remove() # remove log from arg parsing if prod
     args = getArgs()
 
+    if args.base_out_dir.startswith('/var/ftp/quicklooks') and not os.getcwd().startswith('/apps/adc/act/quicklooks/dailyquicklooks'):
+        log.warning('Output dir is pointed to production, but the current working directory is not production. Exiting...')
+        print('Output dir is pointed to production, but the current working directory is not production. Exiting...')
+        sys.exit()
+
     log.remove()
     log.add(args.log_file, level='INFO', enqueue=True, colorize=True, rotation='100 MB', compression='zip',
             format='<g>{time:YYYY-MM-DD HH:mm:ss!UTC}</g> | <lvl>{level: >4}</lvl> | <lvl>{message}</lvl>')
