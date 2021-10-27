@@ -672,15 +672,6 @@ def main(args):
     # print('This should be one of the last thing printed.')
 
 
-def _get_index_file(index_base_dir, plot_file_path):
-    year = plot_file_path.split('/')[4] # if plot_file_path.startswith('/var/ftp/quicklooks') else re.search('(?<=\/)\d{4}(?=\/)', plot_file_path).group()
-    # year = os.path.basename(plot_file_path).split('.')[2][:4]
-    idxfile = 'index.txt'
-    index_file_path = os.path.join(index_base_dir, year, idxfile)
-    # os.makedirs(os.path.dirname(index_file_path), exist_ok=True) # used for testing
-    print(plot_file_path, file=open(index_file_path, 'a'), end='') # 3
-
-
 def getArgs():
     parent = getparser()
     subparser = argparse.ArgumentParser(description='Create GeoDisplay Plot', parents=[parent])
@@ -734,17 +725,29 @@ if __name__ == '__main__':
     log.info('[BEGIN]', started, '\n--------------------------------------------\n')
     log.add(args.debug_log_file, enqueue=True, colorize=True, rotation='100 MB', compression='zip',
             filter=lambda record: record['level'].name == 'DEBUG')
+
     if args.index:
+        def _get_index_file(index_base_dir, plot_file_path):
+            year = plot_file_path.split('/')[4] # if plot_file_path.startswith('/var/ftp/quicklooks') else re.search('(?<=\/)\d{4}(?=\/)', plot_file_path).group()
+            index_file_path = os.path.join(index_base_dir, year, 'index.txt')
+            print(plot_file_path, file=open(index_file_path, 'a'), end='')  # 3
+        def _get_dev_index_file(index_base_dir, plot_file_path): # Only used for index file testing
+            year = os.path.basename(plot_file_path).split('.')[2][:4]
+            index_file_path = os.path.join(index_base_dir, year, 'index.txt')
+            print(plot_file_path, file=open(index_file_path, 'a'), end='')
+
         log.level('INDEX', no=2)
         log.__class__.index = partialmethod(log.__class__.log, 'INDEX')
-        partial__get_index_file = partial(_get_index_file, args.base_out_dir)
+        partial__get_index_file = partial(_get_index_file, args.base_out_dir) \
+            if args.base_out_dir.startswith('/var/ftp/quicklooks') else partial(_get_dev_index_file, args.base_out_dir)
         log.add(partial__get_index_file, enqueue=True, colorize=False,
                 filter=lambda record: record['level'].name == 'INDEX',
                 level='INDEX',
                 format='{message}')
+
     progress_counter = multiprocessing.Value('i', 0)
     total_counter = multiprocessing.Value('i', 0)
+
     main(args)
-    log.info('Done with all!\n')
-    elapsed_time = datetime.now() - started
-    log.info(f'[Processing time] {elapsed_time}\n\n')
+
+    log.info(f'[Processing time] {datetime.now() - started}\n--------------------------------------------------------------\n')
