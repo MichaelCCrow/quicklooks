@@ -175,6 +175,8 @@ def create_symlinks_for_existing_images(imgfiles, datastream, img_type):
     thumb = ''
     i = 0
     ''' Create symlinks to the images in the ftp area '''
+    # TODO: Change this from only symlinking 10 files to symlinking all
+    log.warning('Only symlinking first 10')
     for imgfile_path in imgfiles[:10]:
         dest = join(get_output_dir(imgfile_path, datastream), basename(imgfile_path))
         log.debug(f'[src] {imgfile_path} --> [dest] {dest}')
@@ -263,6 +265,8 @@ def process_tars(tarfiles, datastream):
 
 def main(args):
     global tarcounter
+    # TODO: Change this to process all if not args.datastreams
+    if not args.datastreams: log.warning('Only processing 2 datastreams')
     datastreams = args.datastreams or get_img_datastreams(args.days)[:2]
     # datastreams = [('marcamseastateM1.a1', 'jpg')] # used to test symlinks
     log.debug(datastreams)
