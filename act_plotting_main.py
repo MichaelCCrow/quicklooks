@@ -610,49 +610,6 @@ class ReadDatastreamTxtsAction(argparse.Action):
         return self.read_txts(txts)
 
 
-def getArgs():
-    parent = getparser()
-    subparser = argparse.ArgumentParser(description='Create GeoDisplay Plot', parents=[parent])
-    parser = subparser.add_argument_group('wrapper script arguments')
-    parser.add_argument('-days', '--num-days', type=int,
-                        help='Number of days offset from latest file date to process')
-    parser.add_argument('-nt', '--num-threads', type=int,
-                        help='Max number of threads')
-
-    dsargs = subparser.add_argument_group('datastream selection required arguments').add_mutually_exclusive_group(required=True)
-    # TODO: Add functionality for this
-    # dsargs.add_argument('-sites2', '--site-list', nargs='+', dest='sites',
-    #                     help='Sites for which to process datastreams, excluding the following data levels: .a1 .a0 .00 | Example: -sites sgp nsa ena')
-    dsargs.add_argument('-D', '--datastreams', nargs='+', metavar='datastream',
-                        help='Datastreams to process. Provide each datastream separated by a space. Example: -D sgp30ebbrE10.b1 nsa30ebbrE10.b1')
-    dsargs.add_argument('-txtfiles', '--datastream-txts', nargs='+', dest='datastreams', metavar='file.txt', action=ReadDatastreamTxtsAction,
-                        help='Provide a space separated list of paths to datastream txt files. Example: -txtfiles nsa.txt subdir/sgp.txt tempENA.txt')
-    dsargs.add_argument('-txtdir', '--use-txt-dir', nargs=0, dest='datastreams', action=ReadDatastreamTxtsAction,
-                        help='Signals to to the script to use only the txt files found in the relative subdirectory "txt".'
-                             'Only files named with 3-letter site code and ".txt" extension will be used. Others will be ignored.')
-
-    parser.add_argument('-maxFs', '--max-file-size', type=int, default=100000000, dest='max_file_size',
-                        help='Max file size in number of bytes - default is 100000000 (100MB)')
-    parser.add_argument('--log-file', type=str,
-                        default=sys.stderr if gethostname()=='mcmbpro' else 'logs/act.log',
-                        help='File to write output logs to. Should end with ".log". (default: %(default)s)')
-    parser.add_argument('-baseOut', '--base-out-dir', type=str, default='/data/ql_plots/',
-                        help='Base Out Directory to use for saving Plot. Do not use default. (default %(default)s)')
-    parser.add_argument('--debug-log-file', type=str, default='logs/debug.log',
-                        help='Full file path to debug log file. (default: %(default)s)')
-    parser.add_argument('--index', '--write-index-txt', dest='index', action='store_true',
-                        help='Flag to indicate that index files should be written to for ElasticSearch to pick up. '
-                             'The base directory is the same as the value for the --base-out-dir argument. '
-                             'NOTE: This argument is primarily intended to be omitted for debugging and testing and '
-                             'should ALWAYS be true in production, or files will be missed.')
-
-    '''These are not used from the command line - they are set later in the program'''
-    # parser.add_argument('-f', '--file-path', type=str, help='File to use for creating Plot')
-    # parser.add_argument('-o', '--out_path', type=str, help='File path to use for saving image')
-    # parser.add_argument('-fd', '--field', type=str, default=None, help='Name of the field to plot')
-    return subparser.parse_args()
-
-
 def main(args):
     global total_counter
     global progress_counter
@@ -722,6 +679,47 @@ def _get_index_file(index_base_dir, plot_file_path):
     index_file_path = os.path.join(index_base_dir, year, idxfile)
     # os.makedirs(os.path.dirname(index_file_path), exist_ok=True) # used for testing
     print(plot_file_path, file=open(index_file_path, 'a'), end='') # 3
+
+
+def getArgs():
+    parent = getparser()
+    subparser = argparse.ArgumentParser(description='Create GeoDisplay Plot', parents=[parent])
+    parser = subparser.add_argument_group('wrapper script arguments')
+    parser.add_argument('-days', '--num-days', type=int,
+                        help='Number of days offset from latest file date to process')
+    parser.add_argument('-nt', '--num-threads', type=int,
+                        help='Max number of threads')
+    parser.add_argument('-maxFs', '--max-file-size', type=int, default=100000000, dest='max_file_size',
+                        help='Max file size in number of bytes - default is 100000000 (100MB)')
+    parser.add_argument('--log-file', type=str,
+                        default=sys.stderr if gethostname()=='mcmbpro' else 'logs/act.log',
+                        help='File to write output logs to. Should end with ".log". (default: %(default)s)')
+    parser.add_argument('-baseOut', '--base-out-dir', type=str, default='/data/ql_plots/',
+                        help='Base Out Directory to use for saving Plot. Do not use default. (default %(default)s)')
+    parser.add_argument('--debug-log-file', type=str, default='logs/debug.log',
+                        help='Full file path to debug log file. (default: %(default)s)')
+    parser.add_argument('--index', '--write-index-txt', dest='index', action='store_true',
+                        help='Flag to indicate that index files should be written to for ElasticSearch to pick up. '
+                             'The base directory is the same as the value for the --base-out-dir argument. '
+                             'NOTE: This argument is primarily intended to be omitted for debugging and testing and '
+                             'should ALWAYS be true in production, or files will be missed.')
+    dsargs = subparser.add_argument_group('datastream selection required arguments').add_mutually_exclusive_group(required=True)
+    # TODO: Add functionality for this
+    # dsargs.add_argument('-sites2', '--site-list', nargs='+', dest='sites',
+    #                     help='Sites for which to process datastreams, excluding the following data levels: .a1 .a0 .00 | Example: -sites sgp nsa ena')
+    dsargs.add_argument('-D', '--datastreams', nargs='+', metavar='datastream',
+                        help='Datastreams to process. Provide each datastream separated by a space. Example: -D sgp30ebbrE10.b1 nsa30ebbrE10.b1')
+    dsargs.add_argument('-txtfiles', '--datastream-txts', nargs='+', dest='datastreams', metavar='file.txt', action=ReadDatastreamTxtsAction,
+                        help='Provide a space separated list of paths to datastream txt files. Example: -txtfiles nsa.txt subdir/sgp.txt tempENA.txt')
+    dsargs.add_argument('-txtdir', '--use-txt-dir', nargs=0, dest='datastreams', action=ReadDatastreamTxtsAction,
+                        help='Signals to to the script to use only the txt files found in the relative subdirectory "txt".'
+                             'Only files named with 3-letter site code and ".txt" extension will be used. Others will be ignored.')
+
+    '''These are not used from the command line - they are set later in the program'''
+    # parser.add_argument('-f', '--file-path', type=str, help='File to use for creating Plot')
+    # parser.add_argument('-o', '--out_path', type=str, help='File path to use for saving image')
+    # parser.add_argument('-fd', '--field', type=str, default=None, help='Name of the field to plot')
+    return subparser.parse_args()
 
 
 # TODO: Add proper README.md
