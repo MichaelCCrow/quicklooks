@@ -75,15 +75,16 @@ def offsetDays(file, days=1):
 
 @timer
 def getPathStrs(dataDir):
-    pathlistNC = Path(dataDir).glob('**/*.nc')
+    return [ os.path.join(dataDir, f) for f in set(os.listdir(dataDir)) if f.endswith('.nc') or f.endswith('.cdf') ]
+    # pathlistNC = Path(dataDir).glob('**/*.nc')
     # pathlistNC = list(filter(lambda p: offsetDays(p, days), pathlistNC))
-    pathlistCDF = Path(dataDir).glob('**/*.cdf')
+    # pathlistCDF = Path(dataDir).glob('**/*.cdf')
     # pathlistCDF = list(filter(lambda p: offsetDays(p, days), pathlistCDF))
 
-    pathStrs = list(map(str, pathlistNC))
-    pathStrs += list(map(str, pathlistCDF))
+    # pathStrs = list(map(str, pathlistNC))
+    # pathStrs += list(map(str, pathlistCDF))
 
-    return pathStrs
+    # return pathStrs
 
 
 @timer
@@ -416,8 +417,8 @@ def processPm(args, dsname, data_file_path, pm):
             progress_counter.value += 2
             log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value / total_counter.value) * 100)}%\r')
         # Check if we've already inserted a url for this datastream
-        # urlStr = outpaths[0].replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
-        # update_ql_tables(urlStr, dsname, pm, args.end_dates)
+        urlStr = outpaths[0].replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
+        update_ql_tables(urlStr, dsname, pm, args.end_dates)
         return
 
     started_act_read_cdf = datetime.now()
@@ -464,8 +465,8 @@ def processPm(args, dsname, data_file_path, pm):
         # if os.path.exists(args.out_path):
         if (idx==0 and thumb_exists) or (idx==1 and img_exists):
             log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value/total_counter.value)*100)}%\r')
-            # urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
-            # update_ql_tables(urlStr, dsname, pm, args.end_dates)
+            urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
+            update_ql_tables(urlStr, dsname, pm, args.end_dates)
             continue
 
         if idx == 1:
@@ -664,10 +665,11 @@ def main(args):
         sys.exit(1)
     if not args.index:
         log.warning('Index flag is not set. New plots will not be added to the index.txts and ElasticSearch will be out of sync.')
-        sys.stderr.write('Index flag is not set. New plots will not be added to the index.txts and ElasticSearch will be out of sync.')
+        sys.stderr.write('Index flag is not set. New plots will not be added to the index.txts and ElasticSearch will be out of sync.\n')
 
+    log.info(f'Running for Datastreams: {args.datastreams}')
     # sites = set([ ds[:3] for ds in args.datastreams ])
-    site_ds_grouped = [(site, list(dsnames)) for site, dsnames in groupby(args.datastreams, lambda ds: ds[:3])]
+    site_ds_grouped = [(site, set(dsnames)) for site, dsnames in groupby(args.datastreams, lambda ds: ds[:3])]
     for site, ds_names in site_ds_grouped:
         log.info('********************************************************\n')
         log.info(f'[Processing][site] [{site}]')
@@ -715,6 +717,7 @@ def main(args):
 
 def _get_index_file(index_base_dir, plot_file_path):
     year = plot_file_path.split('/')[4] # if plot_file_path.startswith('/var/ftp/quicklooks') else re.search('(?<=\/)\d{4}(?=\/)', plot_file_path).group()
+    # year = os.path.basename(plot_file_path).split('.')[2][:4]
     idxfile = 'index.txt'
     index_file_path = os.path.join(index_base_dir, year, idxfile)
     # os.makedirs(os.path.dirname(index_file_path), exist_ok=True) # used for testing
