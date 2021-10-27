@@ -172,7 +172,7 @@ def getSegmentName(dataFilePath):
 
     return dateDir
 
-
+# TODO: Move this to just above combine()
 def combineImages(imagePaths, plot_file_path):
     try:
         images = [Image.open(x) for x in imagePaths]
@@ -418,6 +418,7 @@ def processPm(args, dsname, data_file_path, pm):
             log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value / total_counter.value) * 100)}%\r')
         # Check if we've already inserted a url for this datastream
         urlStr = outpaths[0].replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
+        # TODO: Gather these and run the update/insert queries only once per pm at the end of the multiprocessing loop
         update_ql_tables(urlStr, dsname, pm, args.end_dates)
         return
 
@@ -572,44 +573,6 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
             log.warning(f'[No plots generated for datastream] [{dsname}]')
 
 
-class ReadDatastreamTxtsAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        if option_string == '--use-txt-dir' or option_string == '-txtdir':
-            setattr(namespace, self.dest, self.datastream_txts())
-            return
-        txtfiles = [ v for v in values if os.path.isfile(v) ]
-        notfiles = [ v for v in values if v not in txtfiles ]
-        if notfiles: log.warning(f'[not files] {notfiles}')
-        ds = self.read_txts(txtfiles)
-        setattr(namespace, self.dest, ds)
-
-    def read_txts(self, txts):
-        ds = []
-        for txt in txts:
-            with open(txt, 'r') as f:
-                lines = f.read().splitlines()
-                ds += lines
-                # for line in lines: ds.append(line)
-        log.debug(ds)
-        return ds
-
-    def datastream_txts(self, txtdir='txt'):
-        if not os.path.isdir(txtdir):
-            log.error(f'[directory does not exist] {txtdir}')
-            raise argparse.ArgumentError(None, message=f'["{txtdir}/" directory does not exist] '
-                                                       f'The {txtdir} directory is required to exist in the same relative '
-                                                       f'directory as this script in order to use this argument.\n'
-                                                       f'Run {os.path.basename(sys.argv[0])} -h for usage details.')
-        txts = os.listdir(txtdir)
-        # txt files must be a 3-letter site code with '.txt' extension
-        pat = re.compile('^[a-z]{3}\.txt$')
-        # nomatch = [ t for t in txts if not re.match(pat, t) ]
-        txts = [os.path.join(txtdir, t) for t in txts if re.match(pat, t)]
-        txts.sort()
-        log.debug(f'[using txts] {txts}')
-        return self.read_txts(txts)
-
-
 def main(args):
     global total_counter
     global progress_counter
@@ -670,6 +633,44 @@ def main(args):
             with progress_counter.get_lock():
                 progress_counter.value = 0
     # print('This should be one of the last thing printed.')
+
+
+class ReadDatastreamTxtsAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if option_string == '--use-txt-dir' or option_string == '-txtdir':
+            setattr(namespace, self.dest, self.datastream_txts())
+            return
+        txtfiles = [ v for v in values if os.path.isfile(v) ]
+        notfiles = [ v for v in values if v not in txtfiles ]
+        if notfiles: log.warning(f'[not files] {notfiles}')
+        ds = self.read_txts(txtfiles)
+        setattr(namespace, self.dest, ds)
+
+    def read_txts(self, txts):
+        ds = []
+        for txt in txts:
+            with open(txt, 'r') as f:
+                lines = f.read().splitlines()
+                ds += lines
+                # for line in lines: ds.append(line)
+        log.debug(ds)
+        return ds
+
+    def datastream_txts(self, txtdir='txt'):
+        if not os.path.isdir(txtdir):
+            log.error(f'[directory does not exist] {txtdir}')
+            raise argparse.ArgumentError(None, message=f'["{txtdir}/" directory does not exist] '
+                                                       f'The {txtdir} directory is required to exist in the same relative '
+                                                       f'directory as this script in order to use this argument.\n'
+                                                       f'Run {os.path.basename(sys.argv[0])} -h for usage details.')
+        txts = os.listdir(txtdir)
+        # txt files must be a 3-letter site code with '.txt' extension
+        pat = re.compile('^[a-z]{3}\.txt$')
+        # nomatch = [ t for t in txts if not re.match(pat, t) ]
+        txts = [os.path.join(txtdir, t) for t in txts if re.match(pat, t)]
+        txts.sort()
+        log.debug(f'[using txts] {txts}')
+        return self.read_txts(txts)
 
 
 def getArgs():
