@@ -415,7 +415,8 @@ def processPm(args, dsname, data_file_path, pm):
     if thumb_exists and img_exists:
         with progress_counter.get_lock():
             progress_counter.value += 2
-            log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value / total_counter.value) * 100)}%\r')
+            if args.progress_monitor:
+                log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value / total_counter.value) * 100)}%\r')
         # Check if we've already inserted a url for this datastream
         urlStr = outpaths[0].replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
         # TODO: Gather these and run the update/insert queries only once per pm at the end of the multiprocessing loop
@@ -465,7 +466,8 @@ def processPm(args, dsname, data_file_path, pm):
         # TODO: When generating NEW plots, this will not put the URLs in the database since they don't exist. #FIXME
         # if os.path.exists(args.out_path):
         if (idx==0 and thumb_exists) or (idx==1 and img_exists):
-            log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value/total_counter.value)*100)}%\r')
+            if args.progress_monitor:
+                log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value/total_counter.value)*100)}%\r')
             urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
             update_ql_tables(urlStr, dsname, pm, args.end_dates)
             continue
@@ -690,6 +692,8 @@ def getArgs():
                         help='Base Out Directory to use for saving Plot. Do not use default. (default %(default)s)')
     parser.add_argument('--debug-log-file', type=str, default='logs/debug.log',
                         help='Full file path to debug log file. (default: %(default)s)')
+    parser.add_argument('--progress-monitor', action='store_true',
+                        help='Display progress percentage when chugging through existing plots. Not recommended for production.')
     parser.add_argument('--index', '--write-index-txt', dest='index', action='store_true',
                         help='Flag to indicate that index files should be written to for ElasticSearch to pick up. '
                              'The base directory is the same as the value for the --base-out-dir argument. '
