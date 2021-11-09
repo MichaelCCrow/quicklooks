@@ -22,7 +22,8 @@ from quicklooks.args import getparser
 from settings import DB_SETTINGS
 
 progress_counter = None
-total_counter = None
+total_counter = 0
+watchprogress = False
 
 def getDBConnection():
     dbname = "dbname='" + DB_SETTINGS['dbname'] + "' "
@@ -361,7 +362,7 @@ def combine(image_paths):
         log.warning('[combine][len<=0]')
         return
     plot_file_path = re.sub('([a-z_]+)(?=\.png)', '', image_paths[0]).replace('..', '.')
-    log.info(f'[combine][total][{len(image_paths)}] -> {plot_file_path}')
+    log.debug(f'[combine][total][{len(image_paths)}] -> {plot_file_path}')
     # plot_file_path = getPlotFilePath(site_name, dsname, args.base_out_dir, out_dir, '', path_in_str)
     try:
         combineImages(image_paths, plot_file_path)
@@ -390,6 +391,12 @@ def update_ql_tables(urlStr, dsname, pm, end_dates):
     conn.close()
 
 
+erase = '\x1b[1A\x1b[2K'
+def monitor_progress(dsname):
+    if watchprogress:
+        print(f'{erase}[{dsname}] {progress_counter.value}/{total_counter} | {int((progress_counter.value / total_counter) * 100)}%')
+
+
 fig_sizes = [(1.0, 1.0), (7.4, 4.0)]
 fig_size_dirs = ['/.icons', '']
 
@@ -397,7 +404,7 @@ fig_size_dirs = ['/.icons', '']
 def processPm(args, dsname, data_file_path, pm):
     global progress_counter
     idx_started = datetime.now()
-    log.debug(f'[{data_file_path.split("/")[5]}] [{pm}] | {progress_counter.value}/{total_counter.value}')
+    log.debug(f'[{data_file_path.split("/")[5]}] [{pm}] | {progress_counter.value}/{total_counter}')
 
     args.file_path = data_file_path # required for timeseries function
     fsize = os.path.getsize(data_file_path)
@@ -415,30 +422,38 @@ def processPm(args, dsname, data_file_path, pm):
     if thumb_exists and img_exists:
         with progress_counter.get_lock():
             progress_counter.value += 2
-            if args.progress_monitor:
-                log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value / total_counter.value) * 100)}%\r')
+            monitor_progress(dsname)
         # Check if we've already inserted a url for this datastream
-        urlStr = outpaths[0].replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
-        # TODO: Gather these and run the update/insert queries only once per pm at the end of the multiprocessing loop
-        update_ql_tables(urlStr, dsname, pm, args.end_dates)
+        if args.update_db:
+            urlStr = outpaths[0].replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
+            # TODO: Gather these and run the update/insert queries only once per pm at the end of the multiprocessing loop
+            update_ql_tables(urlStr, dsname, pm, args.end_dates)
         return
 
+    skip_datastream = False
     started_act_read_cdf = datetime.now()
     try:
         try:
             dataset = act.io.armfiles.read_netcdf(data_file_path)
         except Exception as e:
             log.error(f'[FAILED][ACT][could not read netcdf file using ACT library] {data_file_path} [REASON] {e}')
-            return
+            skip_datastream = True
         if pm not in dataset.data_vars.keys():
             log.debug(f'[SKIPPING][measurement-not-in-cdf] [{pm}] [{os.path.basename(data_file_path)}]')
             dataset.close()
-            return
+            skip_datastream = True
         args.dataset = dataset
     except Exception as e:
         log.critical(f'[FAILED][checking for measurements in cdf file] {data_file_path} [REASON] {e}')
         dataset.close()
-        return
+        skip_datastream = True
+    finally:
+        if skip_datastream:
+            with progress_counter.get_lock():
+                progress_counter.value += 2
+                monitor_progress(dsname)
+            return
+
     elapsed = datetime.now() - started_act_read_cdf
     if elapsed.total_seconds() > 3:
         log.info(f'[time][act_read_cdf] {elapsed}')
@@ -449,8 +464,7 @@ def processPm(args, dsname, data_file_path, pm):
     args.field = pm
     args.yrange = getyrange(dsname, pm)
     # TODO: Fix/update the yranges in the database
-    if args.yrange is None:
-        log.warning(f'[Y-Range not found] {dsname} <-> {pm}')
+    # if args.yrange is None: log.warning(f'[Y-Range not found] {dsname} <-> {pm}')
 
     # TODO: Figure out how to remove the necessity for a loop
     for idx in range(2):
@@ -461,15 +475,15 @@ def processPm(args, dsname, data_file_path, pm):
         #                                   pm, data_file_path)
         with progress_counter.get_lock():
             progress_counter.value += 1
+            monitor_progress(dsname)
 
         # TODO: Once Elastic is implemented, remove the table inserts, as they will no longer be needed.
         # TODO: When generating NEW plots, this will not put the URLs in the database since they don't exist. #FIXME
         # if os.path.exists(args.out_path):
         if (idx==0 and thumb_exists) or (idx==1 and img_exists):
-            if args.progress_monitor:
-                log.opt(raw=True).info(f'[{dsname}] {progress_counter.value}/{total_counter.value} | {int((progress_counter.value/total_counter.value)*100)}%\r')
-            urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
-            update_ql_tables(urlStr, dsname, pm, args.end_dates)
+            if args.update_db:
+                urlStr = args.out_path.replace(args.base_out_dir, 'https://adc.arm.gov/quicklooks/')
+                update_ql_tables(urlStr, dsname, pm, args.end_dates)
             continue
 
         if idx == 1:
@@ -487,15 +501,13 @@ def processPm(args, dsname, data_file_path, pm):
                 # thumbnail for the .icons sub directory
                 thumbnail = args.out_path
                 if os.path.getsize(thumbnail) <= 409:
-                    log.info(f'[blank] {thumbnail}')
+                    log.debug(f'[blank] {thumbnail}')
                     log.index(thumbnail+'.blank')
                 else:
                     log.index(thumbnail)
             action_time = datetime.now() - action_started
             if action_time.total_seconds() > 30:
-                log.info(f'[plot-generated] {args.out_path} | [time][>30s] {action_time.total_seconds()}s')
-            else:
-                log.info(f'[plot-generated] {args.out_path}')
+                log.success(f'[plot-generated] {args.out_path} | [time][>30s] {action_time.total_seconds()}s')
         except Exception as e:
             # from traceback import print_exc
             # print_exc()
@@ -529,11 +541,16 @@ def processPm(args, dsname, data_file_path, pm):
     return imgpath
 
 
+num_ds = 0
+procds = 0
+
+
 def getPrimaryForDs(args, dsname, ds_dir, pm_list):
     global total_counter
-    log.info('\n**************************************')
-    log.info(f'[PROCESSING][datastream] [{dsname}]')
-    log.info(f'[input-directory] [{ds_dir}] listing files...')
+    if args.progress_monitor:
+        print(f'{erase} {procds}/{num_ds} | {dsname}\n')
+        print(f'{erase} {dsname} ...')
+    log.debug(f'[input-directory] [{ds_dir}] listing files...')
 
     # Unfiltered list of cdf files in the datastream directory
     path_strs = getPathStrs(ds_dir)
@@ -544,14 +561,15 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
 
     current_idxs = getSortedFileIndices(args.start_date, args.num_days, path_strs)
     log.debug(f'[current_idxs] {current_idxs}')
+
     num_to_process = len(current_idxs)
-    log.info(f'[files-to-process] [{num_to_process} out of {len(path_strs)}]')
-    log.info(f'[measurements] [{len(pm_list)}] {pm_list}')
     num_pngs_to_generate = num_to_process * len(pm_list) * 2
-    log.info(f'[pngs-to-generate] [{num_pngs_to_generate}]')
+    log.info(f'[processing] {dsname} | [#files] {num_to_process} | '
+             f'[#PMs] {len(pm_list)} | [#PNGs] {num_pngs_to_generate}')
+
     # log.info(f'[current-output-directory] [{out_dir}]\n')
-    with total_counter.get_lock():
-        total_counter.value = num_pngs_to_generate
+    total_counter = num_pngs_to_generate
+    monitor_progress(dsname)
 
     data_file_paths = np.array(path_strs)[current_idxs] # [ /data/archive/nsa/nsa30ecorE10.b1/nsa30ecorE10.b1.20210925.000000.cdf, ...]
 
@@ -571,6 +589,7 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
             image_paths = [ list(i) for j, i in groupby(image_paths,
                                                         lambda a: re.search('([a-zA-Z0-9]+\.[a-z0-9]{2}\.\d{8})', a).group())]
             pool.map(combine, image_paths)
+            log.info(f'[completed][{dsname}] [#plot-thumbnails-generated] {len(image_paths)}')
         else:
             log.warning(f'[No plots generated for datastream] [{dsname}]')
 
@@ -578,6 +597,8 @@ def getPrimaryForDs(args, dsname, ds_dir, pm_list):
 def main(args):
     global total_counter
     global progress_counter
+    global num_ds
+    global procds
 
     if not args.datastreams: # This should never occur since args are required and mutually exclusive
         print(
@@ -586,8 +607,14 @@ def main(args):
             'named like sgp.txt or anx.txt. If you wish to try this anyway, uncomment the proceeding lines in main().')
         sys.exit(1)
     if not args.index:
-        log.warning('Index flag is not set. New plots will not be added to the index.txts and ElasticSearch will be out of sync.')
-        sys.stderr.write('Index flag is not set. New plots will not be added to the index.txts and ElasticSearch will be out of sync.\n')
+        index_warning = "--index flag is not set. New plots will not be added to the index.txt's and ElasticSearch will be out of sync."
+        log.warning(index_warning)
+        sys.stderr.write(index_warning+'\n')
+        if os.getcwd().startswith('/apps/adc/act/quicklooks/dailyquicklooks'):
+            sys.exit(1)
+
+    if not args.update_db:
+        log.warning('NOT updating the database tables since the --update-db argument was not given.')
 
     log.info(f'Running for Datastreams: {args.datastreams}')
     # sites = set([ ds[:3] for ds in args.datastreams ])
@@ -604,21 +631,21 @@ def main(args):
         if len(ds_names) == 0:
             log.info(f'No recent datastream files in the day range [{args.num_days}] for site [{site}]')
             continue
-        log.info(f'[datastreams within {args.num_days} day(s)] {ds_names}')
-        log.info(f'[total] {len(ds_names)}')
+        num_ds = len(ds_names)
+        log.info(f'[datastreams within {args.num_days} day(s)] [{num_ds}] {ds_names}')
 
         args.start_date = 'current'
         args.end_dates = getEndDates(data_file_paths)
         pm_dict = buildPrimaryMeasurementDict(ds_names)
         # args.pm_list = buildPrimaryMeasurementDict(ds_names) # only needed if to use the `mtimeseries`, otherwise, don't assign it to `args`
 
-        num_ds = len(ds_names)
         count = 0
 
         def checkprogress(count):
             count += 1
             perc = int((count / num_ds) * 100)
-            log.info(f'[PROGRESS] {count}/{num_ds} | {perc}% [{site}] completed')
+            log.info(f'{count}/{num_ds} | {perc}% [{site}]')
+                     # '\n**************************************')
             return count
 
         for ds in ds_names:
@@ -630,17 +657,17 @@ def main(args):
             ds_dir = data_file_paths[ds_names.index(ds)]
             getPrimaryForDs(args, ds, ds_dir, pm_list)
             count = checkprogress(count)
-            with total_counter.get_lock():
-                total_counter.value = 0
+            total_counter = 0
             with progress_counter.get_lock():
                 progress_counter.value = 0
+            procds += 1
     # print('This should be one of the last thing printed.')
 
 
 class ReadDatastreamTxtsAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         if option_string == '--use-txt-dir' or option_string == '-txtdir':
-            setattr(namespace, self.dest, self.datastream_txts())
+            setattr(namespace, self.dest, self.read_txts_from_txt_dir())
             return
         txtfiles = [ v for v in values if os.path.isfile(v) ]
         notfiles = [ v for v in values if v not in txtfiles ]
@@ -658,7 +685,7 @@ class ReadDatastreamTxtsAction(argparse.Action):
         log.debug(ds)
         return ds
 
-    def datastream_txts(self, txtdir='txt'):
+    def read_txts_from_txt_dir(self, txtdir='txt'):
         if not os.path.isdir(txtdir):
             log.error(f'[directory does not exist] {txtdir}')
             raise argparse.ArgumentError(None, message=f'["{txtdir}/" directory does not exist] '
@@ -694,6 +721,8 @@ def getArgs():
                         help='Full file path to debug log file. (default: %(default)s)')
     parser.add_argument('--progress-monitor', action='store_true',
                         help='Display progress percentage when chugging through existing plots. Not recommended for production.')
+    parser.add_argument('--update-db', action='store_true',
+                        help='Use the flag to update the pre_selected_qls_info and giri_inventory tables')
     parser.add_argument('--index', '--write-index-txt', dest='index', action='store_true',
                         help='Flag to indicate that index files should be written to for ElasticSearch to pick up. '
                              'The base directory is the same as the value for the --base-out-dir argument. '
@@ -756,7 +785,7 @@ if __name__ == '__main__':
                 format='{message}')
 
     progress_counter = multiprocessing.Value('i', 0)
-    total_counter = multiprocessing.Value('i', 0)
+    watchprogress = args.progress_monitor
 
     main(args)
 

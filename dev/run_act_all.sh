@@ -21,6 +21,7 @@ python act_plotting_main.py \
   --base-out-dir /var/ftp/quicklooks/ \
   --max-file-size 200000000 \
   --use-txt-dir \
-  -- index \
+  --index \
   >> logs/act.$(date +\%Y\%m\%d).log 2>&1
+  # -- progress-monitor
 
