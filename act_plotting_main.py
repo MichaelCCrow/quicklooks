@@ -393,7 +393,7 @@ def update_ql_tables(urlStr, dsname, pm, end_dates):
 
 erase = '\x1b[1A\x1b[2K'
 def monitor_progress(dsname):
-    if watchprogress:
+    if watchprogress and total_counter != 0:
         print(f'{erase}[{dsname}] {progress_counter.value}/{total_counter} | {int((progress_counter.value / total_counter) * 100)}%')
 
 
